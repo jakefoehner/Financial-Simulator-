@@ -1,0 +1,8 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition = "2024"
+description = "Projection, tax, and Monte Carlo engine for Finance Simulator (no Tauri deps)"
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }

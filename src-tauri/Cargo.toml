@@ -1,0 +1,21 @@
+[package]
+name = "finance-simulator"
+version = "0.1.0"
+description = "Local-first financial what-if simulator"
+authors = ["Jacob Foehner"]
+edition = "2024"
+
+[lib]
+# The `_lib` suffix keeps the lib name distinct from the bin name.
+name = "finance_simulator_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+engine = { path = "../engine" }
+rusqlite = { version = "0.40.2", features = ["bundled"] }

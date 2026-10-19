@@ -1,0 +1,30 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Rust / Tauri
+/target/
+/src-tauri/target/
+/src-tauri/gen/schemas
+
+# Never commit personal financial data
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.fsim
+
+# Claude Code worktrees
+.claude/worktrees/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.sw?
