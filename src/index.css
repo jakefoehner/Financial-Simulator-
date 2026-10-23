@@ -26,6 +26,11 @@
   --good: #006300;
   --critical: #d03b3b;
   --warning: #c98500;
+
+  /* Range-of-outcomes bands: one blue ramp, lighter = wider band. */
+  --band-outer: #cde2fb;
+  --band-inner: #86b6ef;
+  --band-median: #184f95;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -47,6 +52,10 @@
     --good: #0ca30c;
     --critical: #e66767;
     --warning: #fab219;
+
+    --band-outer: #104281;
+    --band-inner: #256abf;
+    --band-median: #9ec5f4;
   }
 }
 

@@ -100,20 +100,18 @@ export function savingsVerdict(s: Summary, compact: (v: number) => string): { to
 /** "today" = today's dollars (inflation removed); "future" = the actual dollar amounts in that year. */
 export type DollarMode = "today" | "future";
 
+/** Converts a value to the chosen dollars, given the price level it was measured at (today = 1). */
+export function inDollars(value: number, priceLevel: number, mode: DollarMode): number {
+  return mode === "future" ? value : value / priceLevel;
+}
+
 /**
- * Converts a year's value to the chosen dollars. End-of-year balances use the
- * end-of-year price level; flows during the year use the start-of-year level.
+ * Price level at the start of each year (today = 1): the previous year's
+ * end-of-year level. Flows during a year are converted with this; end-of-year
+ * balances use that year's own `priceLevel`. Works for steady and replayed inflation.
  */
-export function inDollars(
-  value: number,
-  y: Pick<YearResult, "priceLevel">,
-  mode: DollarMode,
-  inflation: number,
-  flow = false,
-): number {
-  if (mode === "future") return value;
-  const level = flow ? y.priceLevel / (1 + inflation) : y.priceLevel;
-  return value / level;
+export function startLevels(years: Pick<YearResult, "priceLevel">[]): number[] {
+  return years.map((_, i) => (i === 0 ? 1 : years[i - 1].priceLevel));
 }
 
 /** The series the balance chart stacks, bottom to top. Order is fixed so colors never move. */
@@ -139,9 +137,9 @@ export interface BalanceRow {
   netWorth: number;
 }
 
-export function balanceRows(p: Projection, mode: DollarMode, inflation: number): BalanceRow[] {
+export function balanceRows(p: Projection, mode: DollarMode): BalanceRow[] {
   return p.years.map((y) => {
-    const d = (v: number) => inDollars(v, y, mode, inflation);
+    const d = (v: number) => inDollars(v, y.priceLevel, mode);
     return {
       age: y.age,
       year: y.year,
@@ -170,9 +168,10 @@ export interface CashFlowRow {
   netWorth: number;
 }
 
-export function cashFlowRows(p: Projection, mode: DollarMode, inflation: number): CashFlowRow[] {
-  return p.years.map((y) => {
-    const f = (v: number) => inDollars(v, y, mode, inflation, true);
+export function cashFlowRows(p: Projection, mode: DollarMode): CashFlowRow[] {
+  const levels = startLevels(p.years);
+  return p.years.map((y, i) => {
+    const f = (v: number) => inDollars(v, levels[i], mode);
     return {
       year: y.year,
       age: y.age,
@@ -184,7 +183,7 @@ export function cashFlowRows(p: Projection, mode: DollarMode, inflation: number)
       taxes: f(y.taxes + y.medicareSurcharge),
       saved: f(y.saved + y.contributions),
       shortfall: f(y.shortfall),
-      netWorth: inDollars(y.netWorth, y, mode, inflation),
+      netWorth: inDollars(y.netWorth, y.priceLevel, mode),
     };
   });
 }

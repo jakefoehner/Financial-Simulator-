@@ -27,7 +27,8 @@ pub fn load_household(conn: &Connection) -> Result<Household> {
 
 fn get_assumptions(conn: &Connection) -> Result<Assumptions> {
     Ok(conn.query_row(
-        "SELECT stocks_return, bonds_return, cash_return, real_estate_growth, inflation, stock_dividend_yield
+        "SELECT stocks_return, bonds_return, cash_return, real_estate_growth, inflation, stock_dividend_yield,
+                simulations, steady_inflation
          FROM assumptions WHERE id = 1",
         [],
         |r| {
@@ -38,6 +39,8 @@ fn get_assumptions(conn: &Connection) -> Result<Assumptions> {
                 real_estate_growth: r.get(3)?,
                 inflation: r.get(4)?,
                 stock_dividend_yield: r.get(5)?,
+                simulations: r.get(6)?,
+                steady_inflation: r.get(7)?,
             })
         },
     )?)
@@ -47,7 +50,7 @@ pub fn save_assumptions(conn: &Connection, a: &Assumptions) -> Result<()> {
     a.validate().map_err(Error::Invalid)?;
     conn.execute(
         "UPDATE assumptions SET stocks_return = ?1, bonds_return = ?2, cash_return = ?3, real_estate_growth = ?4,
-             inflation = ?5, stock_dividend_yield = ?6
+             inflation = ?5, stock_dividend_yield = ?6, simulations = ?7, steady_inflation = ?8
          WHERE id = 1",
         params![
             a.stocks_return,
@@ -55,7 +58,9 @@ pub fn save_assumptions(conn: &Connection, a: &Assumptions) -> Result<()> {
             a.cash_return,
             a.real_estate_growth,
             a.inflation,
-            a.stock_dividend_yield
+            a.stock_dividend_yield,
+            a.simulations,
+            a.steady_inflation
         ],
     )?;
     Ok(())

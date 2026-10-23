@@ -157,10 +157,13 @@ impl Default for FilingStatus {
     }
 }
 
-/// Growth and inflation assumptions for the fixed-return forecast. Nominal
-/// yearly rates as decimals.
+/// Growth and inflation assumptions. Nominal yearly rates as decimals.
+///
+/// The steady path uses these every year. The range of outcomes replays real
+/// market years scaled so their long-run compound growth equals these rates
+/// (see `history.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct Assumptions {
     pub stocks_return: f64,
     pub bonds_return: f64,
@@ -169,6 +172,10 @@ pub struct Assumptions {
     pub inflation: f64,
     /// Part of the stock return paid out as qualified dividends (taxed yearly in taxable accounts).
     pub stock_dividend_yield: f64,
+    /// Number of replayed-history scenarios in the range of outcomes.
+    pub simulations: u32,
+    /// Use constant inflation in every scenario instead of replaying history's.
+    pub steady_inflation: bool,
 }
 
 impl Default for Assumptions {
@@ -180,6 +187,8 @@ impl Default for Assumptions {
             real_estate_growth: 0.03,
             inflation: 0.025,
             stock_dividend_yield: 0.015,
+            simulations: 5_000,
+            steady_inflation: false,
         }
     }
 }
@@ -383,7 +392,8 @@ impl Assumptions {
         in_range("Cash return", self.cash_return, -0.05, 0.1)?;
         in_range("Real estate growth", self.real_estate_growth, -0.1, 0.15)?;
         in_range("Inflation", self.inflation, -0.02, 0.15)?;
-        in_range("Dividend yield", self.stock_dividend_yield, 0.0, self.stocks_return.max(0.0))
+        in_range("Dividend yield", self.stock_dividend_yield, 0.0, self.stocks_return.max(0.0))?;
+        in_range("Scenarios", self.simulations, 100, 20_000)
     }
 }
 

@@ -94,6 +94,10 @@ export interface Assumptions {
   realEstateGrowth: number;
   inflation: number;
   stockDividendYield: number;
+  /** Replayed-history scenarios in the range of outcomes. */
+  simulations: number;
+  /** Constant inflation instead of replaying history's. */
+  steadyInflation: boolean;
 }
 
 /** Mirrors `Assumptions::default()`. */
@@ -104,6 +108,8 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
   realEstateGrowth: 0.03,
   inflation: 0.025,
   stockDividendYield: 0.015,
+  simulations: 5000,
+  steadyInflation: false,
 };
 
 export interface Household {

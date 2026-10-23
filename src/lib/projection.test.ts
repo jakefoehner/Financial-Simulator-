@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { balanceRows, cashFlowRows, inDollars, savingsVerdict, type Projection, type YearResult } from "./projection";
+import {
+  balanceRows,
+  cashFlowRows,
+  inDollars,
+  savingsVerdict,
+  startLevels,
+  type Projection,
+  type YearResult,
+} from "./projection";
 
 function year(overrides: Partial<YearResult>): YearResult {
   const zero = { cash: 0, taxable: 0, taxDeferred: 0, taxFree: 0, realEstate: 0, education: 0 };
@@ -64,14 +72,20 @@ describe("savingsVerdict", () => {
 
 describe("inDollars", () => {
   it("removes inflation for today's dollars", () => {
-    const y = year({ priceLevel: 1.025 ** 2 });
-    expect(inDollars(1.025 ** 2 * 100, y, "today", 0.025)).toBeCloseTo(100);
-    expect(inDollars(500, y, "future", 0.025)).toBe(500);
+    expect(inDollars(1.025 ** 2 * 100, 1.025 ** 2, "today")).toBeCloseTo(100);
+    expect(inDollars(500, 1.05, "future")).toBe(500);
   });
 
-  it("uses the start-of-year level for flows", () => {
-    const y = year({ priceLevel: 1.025 }); // first year: flows are already in today's dollars
-    expect(inDollars(100, y, "today", 0.025, true)).toBeCloseTo(100);
+  it("starts each year at the previous year's price level, even when inflation varies", () => {
+    // 10% inflation in year 1, then 0%: year 2 starts at 1.10 and ends at 1.10.
+    const levels = startLevels([{ priceLevel: 1.1 }, { priceLevel: 1.1 }, { priceLevel: 1.21 }]);
+    expect(levels).toEqual([1, 1.1, 1.1]);
+  });
+
+  it("converts year-2 flows with the year-1 end level", () => {
+    const years = [year({ priceLevel: 1.1 }), year({ priceLevel: 1.1, spending: 110 })];
+    const rows = cashFlowRows(proj(years), "today");
+    expect(rows[1].spending).toBeCloseTo(100);
   });
 });
 
@@ -82,7 +96,7 @@ describe("rows", () => {
       netWorth: 21,
       priceLevel: 1,
     });
-    const [r] = balanceRows(proj([y]), "future", 0.025);
+    const [r] = balanceRows(proj([y]), "future");
     expect(r.realEstate).toBe(11);
     expect(r.netWorth).toBe(21);
   });
@@ -99,7 +113,7 @@ describe("rows", () => {
       taxes: 8,
       medicareSurcharge: 2,
     });
-    const [r] = cashFlowRows(proj([y]), "future", 0.025);
+    const [r] = cashFlowRows(proj([y]), "future");
     expect(r.income).toBe(60);
     expect(r.fromSavings).toBe(35);
     expect(r.spending).toBe(85);

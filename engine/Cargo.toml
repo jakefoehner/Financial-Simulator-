@@ -5,6 +5,9 @@ edition = "2024"
 description = "Projection, tax, and Monte Carlo engine for Finance Simulator (no Tauri deps)"
 
 [dependencies]
+rand = "0.9"
+rand_chacha = "0.9"
+rayon = "1.12.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 

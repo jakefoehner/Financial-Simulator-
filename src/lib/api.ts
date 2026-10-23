@@ -2,6 +2,7 @@
 // Every mutation returns the freshly stored Household.
 import { invoke } from "@tauri-apps/api/core";
 import type { ClaimAgeOutcome, Projection } from "./projection";
+import type { ScenarioDetail, Simulation } from "./simulation";
 import type {
   Account,
   Assumptions,
@@ -30,6 +31,9 @@ export const api = {
   saveAssumptions: (assumptions: Assumptions) => invoke<Household>("save_assumptions", { assumptions }),
   runProjection: (startYear: number) => invoke<Projection>("run_projection", { startYear }),
   compareClaimAges: (startYear: number) => invoke<ClaimAgeOutcome[]>("compare_claim_ages", { startYear }),
+  runSimulation: (startYear: number) => invoke<Simulation>("run_simulation", { startYear }),
+  scenarioDetail: (startYear: number, pathIndex: number) =>
+    invoke<ScenarioDetail>("scenario_detail", { startYear, pathIndex }),
   loadDemo: (which: DemoName) => invoke<Household>("load_demo", { which }),
   clearHousehold: () => invoke<Household>("clear_household"),
 

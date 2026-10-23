@@ -46,15 +46,48 @@ mod tests {
     #[test]
     #[ignore]
     fn dump_demo_json() {
+        use engine::montecarlo::{scenario_detail, simulate};
         use engine::projection::{compare_claim_ages, project};
         let path = std::env::var("FSIM_DUMP").expect("set FSIM_DUMP to an output path");
         let h = household(Demo::Retiree);
-        let json = serde_json::json!({
+        let sim = simulate(&h, 2026).unwrap();
+        // Scenario details keyed "scenario_detail:<pathIndex>" for the preview mock.
+        let details: serde_json::Map<String, serde_json::Value> = sim
+            .representatives
+            .iter()
+            .map(|r| {
+                let d = scenario_detail(&h, 2026, r.path_index).unwrap();
+                (format!("scenario_detail:{}", r.path_index), serde_json::to_value(d).unwrap())
+            })
+            .collect();
+        let mut json = serde_json::json!({
             "get_household": h,
             "run_projection": project(&h, 2026).unwrap(),
             "compare_claim_ages": compare_claim_ages(&h, 2026).unwrap(),
+            "run_simulation": sim,
         });
+        json.as_object_mut().unwrap().extend(details);
         std::fs::write(path, serde_json::to_string(&json).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn demo_ranges_are_sane() {
+        use engine::montecarlo::simulate;
+        let retiree = simulate(&household(Demo::Retiree), 2026).unwrap();
+        let early = simulate(&household(Demo::EarlyCareer), 2026).unwrap();
+        println!(
+            "retiree: money lasts {:.1}%, lives off growth {:.1}%, median end {:.0}, 1-in-10 end {:.0}",
+            retiree.money_lasts * 100.0,
+            retiree.lives_off_growth * 100.0,
+            retiree.investable_real.p50.last().unwrap(),
+            retiree.investable_real.p10.last().unwrap()
+        );
+        println!("early career: money lasts {:.1}%", early.money_lasts * 100.0);
+        assert_eq!(retiree.scenarios, 5_000);
+        // A $6.9M household spending $180k should almost always be fine, but not always.
+        assert!(retiree.money_lasts > 0.85, "{}", retiree.money_lasts);
+        assert!(retiree.lives_off_growth < retiree.money_lasts);
+        assert!(early.money_lasts > 0.5);
     }
 
     /// Guards against the engine drifting into nonsense on realistic households.

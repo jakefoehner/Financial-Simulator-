@@ -5,14 +5,27 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use engine::model::{Account, Assumptions, Debt, Household, HouseholdInfo, Id, IncomeStream, OneTimeExpense, Person};
+use engine::montecarlo::{self, ScenarioDetail, Simulation};
 use engine::projection::{self, ClaimAgeOutcome, Projection};
 use rusqlite::Connection;
 use serde::Serialize;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use tauri::{Manager, State};
 
 struct AppState {
     conn: Mutex<Connection>,
     db_path: PathBuf,
+    /// Last range-of-outcomes result, keyed by a hash of (household, start year).
+    simulation_cache: Mutex<Option<(u64, Arc<Simulation>)>>,
+}
+
+fn cache_key(h: &Household, start_year: i32) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    serde_json::to_string(h).unwrap_or_default().hash(&mut hasher);
+    start_year.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Errors cross the IPC boundary as plain, user-facing strings.
@@ -77,6 +90,40 @@ fn run_projection(state: State<AppState>, start_year: i32) -> CmdResult<Projecti
 fn compare_claim_ages(state: State<AppState>, start_year: i32) -> CmdResult<Vec<ClaimAgeOutcome>> {
     let household = get_household(state)?;
     projection::compare_claim_ages(&household, start_year).map_err(err)
+}
+
+/// Runs the range of outcomes off the main thread; reuses the last result if nothing changed.
+#[tauri::command]
+async fn run_simulation(state: State<'_, AppState>, start_year: i32) -> CmdResult<Arc<Simulation>> {
+    let household = {
+        let conn = state.conn.lock().map_err(err)?;
+        db::load_household(&conn).map_err(err)?
+    };
+    let key = cache_key(&household, start_year);
+    if let Some((k, sim)) = state.simulation_cache.lock().map_err(err)?.as_ref()
+        && *k == key
+    {
+        return Ok(sim.clone());
+    }
+    let sim = tauri::async_runtime::spawn_blocking(move || montecarlo::simulate(&household, start_year))
+        .await
+        .map_err(err)?
+        .map_err(err)?;
+    let sim = Arc::new(sim);
+    *state.simulation_cache.lock().map_err(err)? = Some((key, sim.clone()));
+    Ok(sim)
+}
+
+#[tauri::command]
+async fn scenario_detail(state: State<'_, AppState>, start_year: i32, path_index: usize) -> CmdResult<ScenarioDetail> {
+    let household = {
+        let conn = state.conn.lock().map_err(err)?;
+        db::load_household(&conn).map_err(err)?
+    };
+    tauri::async_runtime::spawn_blocking(move || montecarlo::scenario_detail(&household, start_year, path_index))
+        .await
+        .map_err(err)?
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -147,7 +194,7 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let db_path = dir.join("household.sqlite");
             let conn = db::open(&db_path)?;
-            app.manage(AppState { conn: Mutex::new(conn), db_path });
+            app.manage(AppState { conn: Mutex::new(conn), db_path, simulation_cache: Mutex::new(None) });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -157,6 +204,8 @@ pub fn run() {
             save_assumptions,
             run_projection,
             compare_claim_ages,
+            run_simulation,
+            scenario_detail,
             load_demo,
             clear_household,
             upsert_person,

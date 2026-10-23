@@ -196,23 +196,25 @@ impl Acct {
         }
     }
 
-    fn total_return(&self, r: &Assumptions) -> f64 {
+    fn total_return(&self, m: &MarketYear) -> f64 {
         match self.bucket {
-            Bucket::Cash => r.cash_return,
-            Bucket::RealEstate => r.real_estate_growth,
-            _ if self.account_type == AccountType::Pension => r.bonds_return,
-            _ => self.stocks * r.stocks_return + self.bonds * r.bonds_return + self.cash * r.cash_return,
+            Bucket::Cash => m.cash,
+            Bucket::RealEstate => m.real_estate,
+            _ if self.account_type == AccountType::Pension => m.bonds,
+            _ => self.stocks * m.stocks + self.bonds * m.bonds + self.cash * m.cash,
         }
     }
 
     /// Yearly taxable dividends and interest (only cash and taxable accounts are taxed on them).
-    fn yield_income(&self, r: &Assumptions) -> (f64, f64) {
+    /// Dividend yield and bond coupons stay at assumption levels even when a year's total
+    /// return swings, so a bond price drop never becomes "negative interest".
+    fn yield_income(&self, r: &Assumptions, m: &MarketYear) -> (f64, f64) {
         match self.bucket {
-            Bucket::Cash => (0.0, self.balance * r.cash_return),
+            Bucket::Cash => (0.0, self.balance * m.cash.max(0.0)),
             Bucket::Taxable => {
                 let pays_dividends = !matches!(self.account_type, AccountType::Crypto | AccountType::LlcInterest);
                 let qualified = if pays_dividends { self.balance * self.stocks * r.stock_dividend_yield } else { 0.0 };
-                let interest = self.balance * (self.bonds * r.bonds_return + self.cash * r.cash_return);
+                let interest = self.balance * (self.bonds * r.bonds_return + self.cash * m.cash.max(0.0));
                 (qualified, interest)
             }
             _ => (0.0, 0.0),
@@ -266,12 +268,53 @@ fn withdraw(accts: &mut [Acct], need: f64, year: i32, penalty_free_age: u32) -> 
     d
 }
 
-/// Runs the projection for `start_year` (normally the current calendar year).
-pub fn project(h: &Household, start_year: i32) -> Result<Projection, ProjectionError> {
-    project_with(h, start_year, TaxTables::current())
+/// One year of market results: nominal total returns and inflation, as decimals.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketYear {
+    pub stocks: f64,
+    pub bonds: f64,
+    pub cash: f64,
+    pub real_estate: f64,
+    pub inflation: f64,
 }
 
-pub fn project_with(h: &Household, start_year: i32, t: &TaxTables) -> Result<Projection, ProjectionError> {
+impl MarketYear {
+    /// The same every year: the "steady path".
+    pub fn steady(a: &Assumptions) -> MarketYear {
+        MarketYear {
+            stocks: a.stocks_return,
+            bonds: a.bonds_return,
+            cash: a.cash_return,
+            real_estate: a.real_estate_growth,
+            inflation: a.inflation,
+        }
+    }
+}
+
+/// Number of years the plan covers starting at `start_year` (through the
+/// last adult's plan-to age).
+pub fn horizon_years(h: &Household, start_year: i32) -> Result<usize, ProjectionError> {
+    let adults = h.people.iter().filter(|p| matches!(p.role, Role::Primary | Role::Spouse));
+    let end_year =
+        adults.map(|p| p.birth_year + p.life_expectancy as i32).max().ok_or(ProjectionError::NoPrimaryPerson)?;
+    Ok((end_year - start_year + 1).max(0) as usize)
+}
+
+/// Runs the steady-path projection for `start_year` (normally the current calendar year).
+pub fn project(h: &Household, start_year: i32) -> Result<Projection, ProjectionError> {
+    let steady = MarketYear::steady(&h.assumptions);
+    project_market(h, start_year, TaxTables::current(), |_| steady)
+}
+
+/// Runs the projection with `market(n)` supplying year `n`'s returns and inflation
+/// (n = 0 is `start_year`).
+pub fn project_market(
+    h: &Household,
+    start_year: i32,
+    t: &TaxTables,
+    market: impl Fn(usize) -> MarketYear,
+) -> Result<Projection, ProjectionError> {
     h.validate().map_err(ProjectionError::Invalid)?;
     let primary = h.people.iter().find(|p| p.role == Role::Primary).ok_or(ProjectionError::NoPrimaryPerson)?;
     let adults: Vec<&Person> = h.people.iter().filter(|p| matches!(p.role, Role::Primary | Role::Spouse)).collect();
@@ -279,7 +322,7 @@ pub fn project_with(h: &Household, start_year: i32, t: &TaxTables) -> Result<Pro
 
     let r = h.assumptions;
     let status = h.info.filing_status;
-    let end_year = adults.iter().map(|p| p.birth_year + p.life_expectancy as i32).max().unwrap();
+    let end_year = start_year + horizon_years(h, start_year)? as i32 - 1;
     let start_age = (start_year - primary.birth_year).max(0) as u32;
 
     let mut accts: Vec<Acct> = h.accounts.iter().map(|a| Acct::from(a, person(a.owner_id))).collect();
@@ -316,6 +359,7 @@ pub fn project_with(h: &Household, start_year: i32, t: &TaxTables) -> Result<Pro
 
     for year in start_year..=end_year {
         let n = year - start_year;
+        let m = market(n as usize);
         let index = price * (1.0 + r.inflation).powi(start_year - t.year);
         let age_of = |p: &Person| (year - p.birth_year).max(0) as u32;
         let alive = |p: &Person| age_of(p) <= p.life_expectancy;
@@ -370,7 +414,7 @@ pub fn project_with(h: &Household, start_year: i32, t: &TaxTables) -> Result<Pro
         let (mut qualified_dividends, mut interest) = (0.0, 0.0);
         let mut rmd_total = 0.0;
         for a in accts.iter_mut() {
-            let (q, i) = a.yield_income(&r);
+            let (q, i) = a.yield_income(&r, &m);
             qualified_dividends += q;
             interest += i;
             a.basis += q + i; // reinvested
@@ -485,9 +529,9 @@ pub fn project_with(h: &Household, start_year: i32, t: &TaxTables) -> Result<Pro
 
         // --- 5. Growth ---
         for a in accts.iter_mut() {
-            a.balance *= 1.0 + a.total_return(&r);
+            a.balance *= 1.0 + a.total_return(&m);
         }
-        price *= 1.0 + r.inflation;
+        price *= 1.0 + m.inflation;
 
         let mut balances = Balances::default();
         for a in &accts {

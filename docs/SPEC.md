@@ -49,7 +49,11 @@ Each scenario is a list of changes on top of the base plan. The UI shows scenari
 7. Apply returns per asset class. Track basis.
 8. Record net worth, spendable income, portfolio yield, and the estate value if death occurred that year.
 
-**Return modes:** (a) **Fixed** (default 7% stocks, 4% bonds, 2% cash, 2.5% inflation, all deterministic, one path). (b) **Parametric**: lognormal draws with user means/vols and a stocks/bonds/inflation correlation matrix. (c) **Historical bootstrap**: random whole years from 1928 to present, so cross-asset correlation is preserved. Each mode has a plain-English info panel explaining what it represents. Inflation is fixed by default, with a stochastic option. Default is 5,000 paths, configurable.
+**Return modes** (revised 2026-10-23, see Decisions log):
+- (a) **Steady path:** your Assumptions every year (default 7% stocks, 4% bonds, 2% cash, 3% real estate, 2.5% inflation). One deterministic path.
+- (b) **Range of outcomes:** replayed real history, 1928–2025, in random 5-year runs. Each series is scaled so its compound average equals the Assumptions, and inflation is replayed too. Default 5,000 scenarios (1,000 / 5,000 / 10,000).
+
+The parametric (made-up statistical returns) mode was dropped.
 
 **Success metrics:**
 - **Never runs out** (%): the portfolio covers spending through age 100 (or the chosen age).
@@ -82,11 +86,21 @@ v2 hook: a "tax regime" setting that multiplies or replaces brackets and exempti
 0. **Scaffold:** git init, Tauri 2 + React/TS + Rust workspace, SQLite + migrations, a Tauri command round-trip, lint/format, `cargo test` + `vitest`.
 1. **Data entry:** all tables and CRUD screens, manual input, demo households.
 2. **Tax engine + fixed-return projection:** IRS worked-example tests. A single deterministic projection with charts and the cash-flow table.
-3. **Monte Carlo:** parametric + historical modes, success metrics, fan charts, real vs nominal toggle.
+3. **Range of outcomes:** centered historical replay, odds tiles, fan chart, zoom-in on rough/typical/strong/worst scenarios with the market history each replayed, an always-visible method note, real vs nominal toggle.
 4. **Scenarios + estate/gifting** (mom's priority): the event timeline, gift/estate ledger, LLC/discount, intra-family loans, house gifts, side-by-side comparison.
 5. **Sharing & exports:** `.fsim` encrypt/import, CSV import/export, PDF report.
-6. **Connectivity:** SimpleFIN sync, ticker prices, per-ticker holdings.
+6. **Connectivity:** SimpleFIN sync, ticker prices, per-ticker holdings, and a **single-stock risk model**. Each individual stock's yearly return = that year's market return × its sensitivity to the market + a company-specific swing, estimated from its price history. Its expected return is not assumed to beat the market; the model adds risk, not extra return. This matters for low-basis positions in the Phase 4 gift-vs-hold decision.
 7. **v2:** tax-rise regimes, optional DB encryption, more state-tax detail, stochastic lifespan, signed/notarized build.
+
+## Decisions log
+- **2026-10-23: How the range of outcomes works** (Jacob). Also shown in-app (Forecast → "How this works") and in the README.
+  1. **Replay real history only** (1928–2025), no parametric mode. Crashes land wherever they fall in each scenario. Limitation: no year worse than 1931.
+  2. **Centered on Assumptions:** `(1+r') = (1+r) × (1+target) / (1+historical geometric mean)`. Shape preserved (2008 −37% → about −38% at 7%). Setting stocks to 10% gives essentially unadjusted history. Why: forecasts for the coming decade are mostly below past averages, fees reduce returns, US history is a best case, and over-optimism is the costly error for gifting decisions.
+  3. **5-year runs** of consecutive years keep slumps and inflation regimes intact.
+  4. **Inflation follows history too**, centered on the inflation assumption. Optional "Keep inflation steady".
+  5. **Single-stock risk deferred to Phase 6** (needs ticker data).
+  6. **Range of outcomes is the default Forecast view**, with zoom-in on representative scenarios and their replayed history. The steady path stays one tab away.
+- Success thresholds in the UI: "money lasts" is good at 90%+ and caution at 75–90%. "Lives off growth & income" (a stricter goal) is good at 75%+ and caution at 40–75%.
 
 ## Verification
 - `cargo test -p engine`: tax tests against IRS worked examples and hand-computed cases (brackets, LTCG stacking, SS taxability, NIIT, RMD, gift/estate exemption). Golden-file projections for the demo households. Monte Carlo sanity checks: with zero volatility the result must equal the fixed-mode output, and a fixed seed must be reproducible.
