@@ -11,6 +11,8 @@ import {
   outOf100,
   SCENARIO_LABELS,
   SCENARIO_ORDER,
+  THRESHOLDS,
+  toneFor,
   type Representative,
   type Simulation,
 } from "../../lib/simulation";
@@ -18,15 +20,8 @@ import type { Household } from "../../lib/types";
 import ScenarioDetailView from "./ScenarioDetail";
 import { dollarsLabel, money, StatusTile, Tile } from "./shared";
 
-/** Planning rule of thumb: 90%+ is comfortable, 75–90% deserves a look, below 75% is a concern. */
-function oddsTone(share: number): Tone {
-  return share >= 0.9 ? "good" : share >= 0.75 ? "caution" : "bad";
-}
-
-/** "Ends with at least what you started with, after inflation" is a much stricter goal, so it gets looser bands. */
-function growthTone(share: number): Tone {
-  return share >= 0.75 ? "good" : share >= 0.4 ? "caution" : "bad";
-}
+const oddsTone = (share: number): Tone => toneFor(share, THRESHOLDS.moneyLasts);
+const growthTone = (share: number): Tone => toneFor(share, THRESHOLDS.livesOffGrowth);
 
 const TONE_ICON = { good: CircleCheck, caution: TriangleAlert, bad: CircleAlert } as const;
 const TONE_COLOR = { good: "var(--good)", caution: "var(--warning)", bad: "var(--critical)" } as const;

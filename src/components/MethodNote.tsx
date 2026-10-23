@@ -1,7 +1,7 @@
 import { Info, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { formatPercent } from "../lib/format";
-import { methodSummary, scaledStockReturn } from "../lib/simulation";
+import { DATA_SOURCES, methodSummary, scaledStockReturn, THRESHOLDS } from "../lib/simulation";
 import type { Assumptions } from "../lib/types";
 import { Button } from "./Card";
 
@@ -81,10 +81,18 @@ function MethodPanel({ assumptions: a, onClose }: { assumptions: Assumptions; on
             stocks move with the overall market for now; individual stocks, which swing more, will get their own risk
             model later. Taxes follow current federal law, adjusted for inflation.
           </Section>
-          <p className="text-xs text-[var(--muted)]">
-            Data: A. Damodaran, NYU Stern (stocks, bonds, T-bills, home prices) and the US Bureau of Labor Statistics
-            (CPI-U).
-          </p>
+          <Section title="How results are colored and flagged">
+            "Chance the money lasts" shows a check at {pct(THRESHOLDS.moneyLasts.good, 0)} or more, a caution sign from{" "}
+            {pct(THRESHOLDS.moneyLasts.caution, 0)}, and an alert below that. "Chance you live off growth & income" is a
+            stricter goal, so it shows a check at {pct(THRESHOLDS.livesOffGrowth.good, 0)} or more and a caution sign
+            from {pct(THRESHOLDS.livesOffGrowth.caution, 0)}. When you zoom in on a scenario, a year is flagged as a big
+            stock drop when stocks fall {pct(-THRESHOLDS.crash, 0)} or more, and as high inflation when prices rise{" "}
+            {pct(THRESHOLDS.highInflation, 0)} or more (both after scaling to your Assumptions).
+          </Section>
+          <Section title="The data">
+            Market returns: {DATA_SOURCES.returns}: {DATA_SOURCES.returnsSeries}, 1928–2025. Inflation:{" "}
+            {DATA_SOURCES.inflation}. {DATA_SOURCES.checks} {DATA_SOURCES.quirk}
+          </Section>
         </div>
         <div className="flex justify-end border-t border-[var(--border)] px-6 py-3">
           <Button variant="primary" onClick={onClose}>

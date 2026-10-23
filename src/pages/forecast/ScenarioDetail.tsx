@@ -7,6 +7,7 @@ import { balanceRows, cashFlowRows, type DollarMode } from "../../lib/projection
 import {
   replayRuns,
   SCENARIO_LABELS,
+  THRESHOLDS,
   type ReplayedYear,
   type Representative,
   type ScenarioDetail,
@@ -14,10 +15,8 @@ import {
 import type { Household } from "../../lib/types";
 import { BalancesCard, YearByYearCard } from "./shared";
 
-/** A replayed year counts as a crash for highlighting when (scaled) stocks fell this much. */
-const CRASH = -0.15;
-/** ...and as high inflation when (scaled) prices rose this much. */
-const HIGH_INFLATION = 0.06;
+const CRASH = THRESHOLDS.crash;
+const HIGH_INFLATION = THRESHOLDS.highInflation;
 
 export default function ScenarioDetailView({
   household,
@@ -95,9 +94,10 @@ export default function ScenarioDetailView({
           <p className="mt-2 flex items-start gap-1.5 text-sm">
             <TriangleAlert size={16} className="mt-0.5 shrink-0" style={{ color: "var(--warning)" }} aria-hidden />
             <span>
-              High inflation (6%+) in {inflationary.length} {inflationary.length === 1 ? "year" : "years"}, peaking at{" "}
-              {formatPercent(peakInflation, 1)}: ages {inflationary.map((r) => r.age).join(", ")}. Rising prices push up
-              spending, so savings have to work harder.
+              High inflation ({formatPercent(HIGH_INFLATION, 0)}+) in {inflationary.length}{" "}
+              {inflationary.length === 1 ? "year" : "years"}, peaking at {formatPercent(peakInflation, 1)}: ages{" "}
+              {inflationary.map((r) => r.age).join(", ")}. Rising prices push up spending, so savings have to work
+              harder.
             </span>
           </p>
         )}

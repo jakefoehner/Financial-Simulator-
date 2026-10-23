@@ -123,6 +123,37 @@ export function replayRuns(replayed: ReplayedYear[]): ReplayRun[] {
   return runs;
 }
 
+/**
+ * Display thresholds, shared by the Forecast screens and the "How this works"
+ * panel so the explanation always matches what's on screen. Documented in the
+ * README ("Data & definitions") and the docs/SPEC.md Decisions log.
+ */
+export const THRESHOLDS = {
+  /** "Chance the money lasts": good at or above, caution at or above, otherwise concern. */
+  moneyLasts: { good: 0.9, caution: 0.75 },
+  /** "Chance you live off growth & income" is a stricter goal, so its bands are looser. */
+  livesOffGrowth: { good: 0.75, caution: 0.4 },
+  /** A replayed year is flagged as a crash when scaled stocks fall at least this much. */
+  crash: -0.15,
+  /** ...and as high inflation when scaled prices rise at least this much. */
+  highInflation: 0.06,
+} as const;
+
+export function toneFor(share: number, bands: { good: number; caution: number }): "good" | "caution" | "bad" {
+  return share >= bands.good ? "good" : share >= bands.caution ? "caution" : "bad";
+}
+
+/** Where the bundled history comes from, shown in the app and README. */
+export const DATA_SOURCES = {
+  returns: "A. Damodaran, NYU Stern, “Historical Returns on Stocks, Bonds and Bills” (updated January 5, 2026)",
+  returnsSeries:
+    "S&P 500 including dividends, 10-year US Treasury bond total return, 3-month T-bill, and US home prices",
+  inflation: "US Bureau of Labor Statistics, CPI-U all items (series CUUR0000SA0), December to December",
+  checks:
+    "Compounding every year's figures reproduces the source's own “$100 invested in 1928” totals through 2024 to within 0.1%, and known years match published figures (1931 stocks −43.8%, 2008 −36.6%, 2022 −18.0%, 1980 inflation 12.5%).",
+  quirk: "The source's 2025 Treasury bond row says 7.80% while its running total implies 8.29%; the app uses 7.80%.",
+};
+
 /** Compound average US stock return 1928–2025 in the bundled data (see engine/src/history.rs tests). */
 export const HISTORICAL_STOCK_GEOMEAN = 0.1002;
 

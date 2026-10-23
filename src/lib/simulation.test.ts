@@ -6,6 +6,8 @@ import {
   outOf100,
   replayRuns,
   scaledStockReturn,
+  THRESHOLDS,
+  toneFor,
   type ReplayedYear,
   type Simulation,
 } from "./simulation";
@@ -51,6 +53,16 @@ describe("fanRows", () => {
     } as unknown as Simulation;
     expect(fanRows(sim, "today")[0]).toEqual({ age: 67, year: 2026, outer: [0, 4], inner: [1, 3], median: 2 });
     expect(fanRows(sim, "future")[0].median).toBe(12);
+  });
+});
+
+describe("toneFor", () => {
+  it("applies the documented cutoffs", () => {
+    expect(toneFor(0.9, THRESHOLDS.moneyLasts)).toBe("good");
+    expect(toneFor(0.89, THRESHOLDS.moneyLasts)).toBe("caution");
+    expect(toneFor(0.74, THRESHOLDS.moneyLasts)).toBe("bad");
+    expect(toneFor(0.59, THRESHOLDS.livesOffGrowth)).toBe("caution");
+    expect(toneFor(0.39, THRESHOLDS.livesOffGrowth)).toBe("bad");
   });
 });
 

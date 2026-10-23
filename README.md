@@ -38,7 +38,35 @@ The **Forecast** page has two views:
   - **Limits:** no single year is worse than history's worst (1931). It's US history only. All stocks move with the market (a single-stock risk model comes with ticker data in Phase 6).
 - **Steady path:** your Assumptions every single year. Useful as a simple reference line, plus the Social Security claim-age comparison.
 
-The same explanation is always visible in the app, under the headline ("How this works"). Data: A. Damodaran, NYU Stern (returns) and BLS CPI-U (inflation); see `engine/data/historical_returns.csv`. The decisions behind this are logged in `docs/SPEC.md` → Decisions log.
+The same explanation is always visible in the app, under the headline ("How this works"). The decisions behind this are logged in `docs/SPEC.md` → Decisions log.
+
+### Data & definitions
+*Mirrored in the app's "How this works" panel. The numbers come from `src/lib/simulation.ts` (`THRESHOLDS`, `DATA_SOURCES`), so update both together.*
+
+**Sources** (`engine/data/historical_returns.csv`, 1928–2025, 98 years):
+- **Market returns:** A. Damodaran, NYU Stern, ["Historical Returns on Stocks, Bonds and Bills"](https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/histretSP.html), updated January 5, 2026. The series are the S&P 500 including dividends, the 10-year US Treasury bond total return, the 3-month T-bill (cash), and US home prices (real estate).
+- **Inflation:** US Bureau of Labor Statistics, CPI-U all items (series `CUUR0000SA0`), December to December. Pulled from the BLS public API.
+
+**How the data was checked:**
+- Compounding every year's figures reproduces the source's own "$100 invested in 1928" totals through 2024 to within 0.1% (stocks, T-bills, T-bonds, real estate).
+- Known years match published figures: 1931 stocks −43.8%, 2008 −36.6%, 2022 −18.0%, 1980 inflation 12.5%.
+- Long-run compound averages: stocks 10.0%/yr, inflation 3.0%/yr. Engine tests (`engine/src/history.rs`) check these.
+- **Known quirk:** the source's 2025 Treasury bond row says 7.80%, while its own running total implies 8.29%. The app uses 7.80%.
+
+**Definitions:**
+- **Money lasts:** every year's spending, taxes, and debt payments were paid through the plan's last age.
+- **Live off growth & income:** the scenario ends with at least today's spendable savings (cash, brokerage, retirement accounts) after inflation. Real estate isn't counted, since it's never sold to pay bills.
+- **Rough / typical / strong:** the scenarios at the 10th / 50th / 90th percentile of ending spendable savings. **Worst** is the single toughest scenario.
+- **Shaded bands:** the 10th–90th percentile (8 in 10 scenarios) and the 25th–75th percentile (the middle half).
+
+**Status colors and flags:**
+
+| What | Check (good) | Caution | Alert |
+| --- | --- | --- | --- |
+| Chance the money lasts | 90%+ | 75–90% | below 75% |
+| Chance you live off growth & income (stricter goal) | 75%+ | 40–75% | below 40% |
+
+When you zoom in on a scenario, a year is flagged as a **big stock drop** when stocks fall 15% or more, and as **high inflation** when prices rise 6% or more. Both are measured after scaling to your Assumptions.
 
 ## Releasing (signed DMG to share)
 `npm run release` builds a universal app, signs it with your Developer ID, has Apple notarize it, and copies `Finance Simulator <version>.dmg` to your Desktop. Recipients can open it with a plain double-click.
