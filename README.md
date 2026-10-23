@@ -28,6 +28,16 @@ npm install
 | `npm run format` | Auto-format TS and Rust |
 | `npm run bundle` | Build `Finance Simulator.app` + `.dmg` into `target/release/bundle/` |
 
+## Releasing (signed DMG to share)
+`npm run release` builds a universal app, signs it with your Developer ID, has Apple notarize it, and copies `Finance Simulator <version>.dmg` to your Desktop. Recipients can open it with a plain double-click.
+
+One-time setup:
+1. A **Developer ID Application** certificate in your keychain. Check with `security find-identity -v -p codesigning`. If it shows as invalid, install Apple's [Developer ID G2 intermediate](https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer).
+2. Notary credentials saved in your keychain. Run this in Terminal; it prompts for an app-specific password:
+   `xcrun notarytool store-credentials fsim-notary --apple-id <you@email> --team-id <TEAMID>`
+
+Bump `version` in `src-tauri/tauri.conf.json`, `package.json`, and `src-tauri/Cargo.toml` before each release. Never commit certificates or passwords.
+
 Your data lives at `~/Library/Application Support/com.foehner.financesimulator/household.sqlite` (also shown in Settings).
 
 ## Layout

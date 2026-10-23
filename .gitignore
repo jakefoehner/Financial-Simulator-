@@ -19,6 +19,12 @@ dist-ssr
 *.sqlite-shm
 *.fsim
 
+# Never commit signing material
+*.p12
+*.cer
+*.certSigningRequest
+.env*
+
 # Claude Code worktrees
 .claude/worktrees/
 

@@ -19,6 +19,7 @@ A wealthy, retired single mother in Texas, weighing estate/gift decisions (gifti
 ## Commands
 - `npm run app`: run the desktop app
 - `npm run check`: lint + all tests. Run this before committing.
+- `npm run release`: signed + notarized DMG to the Desktop (see README "Releasing"). Never commit certs or passwords.
 - `npm run test:rust` / `npm test`
 
 ## Conventions
