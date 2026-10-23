@@ -87,6 +87,25 @@ export interface OneTimeExpense {
   amount: number;
 }
 
+export interface Assumptions {
+  stocksReturn: number;
+  bondsReturn: number;
+  cashReturn: number;
+  realEstateGrowth: number;
+  inflation: number;
+  stockDividendYield: number;
+}
+
+/** Mirrors `Assumptions::default()`. */
+export const DEFAULT_ASSUMPTIONS: Assumptions = {
+  stocksReturn: 0.07,
+  bondsReturn: 0.04,
+  cashReturn: 0.02,
+  realEstateGrowth: 0.03,
+  inflation: 0.025,
+  stockDividendYield: 0.015,
+};
+
 export interface Household {
   info: HouseholdInfo;
   people: Person[];
@@ -94,6 +113,7 @@ export interface Household {
   income: IncomeStream[];
   debts: Debt[];
   oneTimeExpenses: OneTimeExpense[];
+  assumptions: Assumptions;
 }
 
 // --- Labels -----------------------------------------------------------------

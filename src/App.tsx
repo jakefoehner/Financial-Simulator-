@@ -18,6 +18,7 @@ import Overview from "./pages/Overview";
 import People from "./pages/People";
 import Placeholder from "./pages/Placeholder";
 import Settings from "./pages/Settings";
+import Results from "./pages/Results";
 import Spending from "./pages/Spending";
 import { useApp, type Section } from "./lib/store";
 
@@ -31,19 +32,20 @@ const NAV: { id: Section; label: string; icon: LucideIcon; phase?: number }[][] 
     { id: "spending", label: "Spending", icon: Receipt },
   ],
   [
+    { id: "results", label: "Forecast", icon: ChartLine },
     { id: "scenarios", label: "Scenarios", icon: GitBranch, phase: 4 },
-    { id: "results", label: "Results", icon: ChartLine, phase: 2 },
   ],
   [{ id: "settings", label: "Settings", icon: SettingsIcon }],
 ];
 
-const PAGES: Partial<Record<Section, () => React.JSX.Element>> = {
+const PAGES: Partial<Record<Section, () => React.JSX.Element | null>> = {
   overview: Overview,
   people: People,
   accounts: Accounts,
   income: Income,
   debts: Debts,
   spending: Spending,
+  results: Results,
   settings: Settings,
 };
 

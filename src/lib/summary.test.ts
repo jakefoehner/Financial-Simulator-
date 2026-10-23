@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import earlyCareerJson from "../../fixtures/demo-early-career.json";
 import retireeJson from "../../fixtures/demo-retiree.json";
 import { isEmpty, monthsToPayoff, setupSteps, summarize } from "./summary";
-import type { Household } from "./types";
+import { DEFAULT_ASSUMPTIONS, type Household } from "./types";
 
 const retiree = retireeJson as unknown as Household;
 const earlyCareer = earlyCareerJson as unknown as Household;
@@ -14,6 +14,7 @@ const empty: Household = {
   income: [],
   debts: [],
   oneTimeExpenses: [],
+  assumptions: DEFAULT_ASSUMPTIONS,
 };
 
 describe("summarize", () => {

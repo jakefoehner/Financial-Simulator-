@@ -1,7 +1,7 @@
 //! Whole-household operations: load everything, replace everything (demo
 //! data, and later `.fsim` import), clear, and the household info row.
 
-use engine::model::{FilingStatus, Household, HouseholdInfo};
+use engine::model::{Assumptions, FilingStatus, Household, HouseholdInfo};
 use rusqlite::{Connection, params};
 
 use super::records::{
@@ -21,7 +21,44 @@ pub fn load_household(conn: &Connection) -> Result<Household> {
         income: list_income(conn)?,
         debts: list_debts(conn)?,
         one_time_expenses: list_one_time_expenses(conn)?,
+        assumptions: get_assumptions(conn)?,
     })
+}
+
+fn get_assumptions(conn: &Connection) -> Result<Assumptions> {
+    Ok(conn.query_row(
+        "SELECT stocks_return, bonds_return, cash_return, real_estate_growth, inflation, stock_dividend_yield
+         FROM assumptions WHERE id = 1",
+        [],
+        |r| {
+            Ok(Assumptions {
+                stocks_return: r.get(0)?,
+                bonds_return: r.get(1)?,
+                cash_return: r.get(2)?,
+                real_estate_growth: r.get(3)?,
+                inflation: r.get(4)?,
+                stock_dividend_yield: r.get(5)?,
+            })
+        },
+    )?)
+}
+
+pub fn save_assumptions(conn: &Connection, a: &Assumptions) -> Result<()> {
+    a.validate().map_err(Error::Invalid)?;
+    conn.execute(
+        "UPDATE assumptions SET stocks_return = ?1, bonds_return = ?2, cash_return = ?3, real_estate_growth = ?4,
+             inflation = ?5, stock_dividend_yield = ?6
+         WHERE id = 1",
+        params![
+            a.stocks_return,
+            a.bonds_return,
+            a.cash_return,
+            a.real_estate_growth,
+            a.inflation,
+            a.stock_dividend_yield
+        ],
+    )?;
+    Ok(())
 }
 
 fn get_info(conn: &Connection) -> Result<HouseholdInfo> {
@@ -65,6 +102,7 @@ pub fn replace_household(conn: &mut Connection, h: &Household) -> Result<()> {
     let tx = conn.transaction()?;
     delete_all(&tx)?;
     save_info(&tx, &h.info)?;
+    save_assumptions(&tx, &h.assumptions)?;
     for p in &h.people {
         insert_person(&tx, p)?;
     }
@@ -89,6 +127,7 @@ pub fn clear_household(conn: &mut Connection) -> Result<()> {
     let tx = conn.transaction()?;
     delete_all(&tx)?;
     save_info(&tx, &HouseholdInfo::default())?;
+    save_assumptions(&tx, &Assumptions::default())?;
     tx.commit()?;
     Ok(())
 }

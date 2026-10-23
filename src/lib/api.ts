@@ -1,7 +1,18 @@
 // Typed wrappers around Tauri commands. Keep names/shapes in sync with src-tauri/src/lib.rs.
 // Every mutation returns the freshly stored Household.
 import { invoke } from "@tauri-apps/api/core";
-import type { Account, Debt, Household, HouseholdInfo, Id, IncomeStream, OneTimeExpense, Person } from "./types";
+import type { ClaimAgeOutcome, Projection } from "./projection";
+import type {
+  Account,
+  Assumptions,
+  Debt,
+  Household,
+  HouseholdInfo,
+  Id,
+  IncomeStream,
+  OneTimeExpense,
+  Person,
+} from "./types";
 
 export interface AppInfo {
   appVersion: string;
@@ -16,6 +27,9 @@ export const api = {
   appInfo: () => invoke<AppInfo>("app_info"),
   getHousehold: () => invoke<Household>("get_household"),
   saveHouseholdInfo: (info: HouseholdInfo) => invoke<Household>("save_household_info", { info }),
+  saveAssumptions: (assumptions: Assumptions) => invoke<Household>("save_assumptions", { assumptions }),
+  runProjection: (startYear: number) => invoke<Projection>("run_projection", { startYear }),
+  compareClaimAges: (startYear: number) => invoke<ClaimAgeOutcome[]>("compare_claim_ages", { startYear }),
   loadDemo: (which: DemoName) => invoke<Household>("load_demo", { which }),
   clearHousehold: () => invoke<Household>("clear_household"),
 

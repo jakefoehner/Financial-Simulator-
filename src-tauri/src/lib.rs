@@ -4,7 +4,8 @@ mod demo;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use engine::model::{Account, Debt, Household, HouseholdInfo, Id, IncomeStream, OneTimeExpense, Person};
+use engine::model::{Account, Assumptions, Debt, Household, HouseholdInfo, Id, IncomeStream, OneTimeExpense, Person};
+use engine::projection::{self, ClaimAgeOutcome, Projection};
 use rusqlite::Connection;
 use serde::Serialize;
 use tauri::{Manager, State};
@@ -58,6 +59,24 @@ fn get_household(state: State<AppState>) -> CmdResult<Household> {
 #[tauri::command]
 fn save_household_info(state: State<AppState>, info: HouseholdInfo) -> CmdResult<Household> {
     mutate(&state, |c| db::save_info(c, &info))
+}
+
+#[tauri::command]
+fn save_assumptions(state: State<AppState>, assumptions: Assumptions) -> CmdResult<Household> {
+    mutate(&state, |c| db::save_assumptions(c, &assumptions))
+}
+
+/// `start_year` comes from the UI's clock so results match what the user sees as "this year".
+#[tauri::command]
+fn run_projection(state: State<AppState>, start_year: i32) -> CmdResult<Projection> {
+    let household = get_household(state)?;
+    projection::project(&household, start_year).map_err(err)
+}
+
+#[tauri::command]
+fn compare_claim_ages(state: State<AppState>, start_year: i32) -> CmdResult<Vec<ClaimAgeOutcome>> {
+    let household = get_household(state)?;
+    projection::compare_claim_ages(&household, start_year).map_err(err)
 }
 
 #[tauri::command]
@@ -135,6 +154,9 @@ pub fn run() {
             app_info,
             get_household,
             save_household_info,
+            save_assumptions,
+            run_projection,
+            compare_claim_ages,
             load_demo,
             clear_household,
             upsert_person,

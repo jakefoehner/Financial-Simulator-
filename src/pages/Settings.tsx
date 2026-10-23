@@ -3,6 +3,7 @@ import { Button, Card, PageHeader } from "../components/Card";
 import { PercentField, Row, SelectField, TextField } from "../components/fields";
 import { ConfirmDialog } from "../components/Sheet";
 import { api, type AppInfo } from "../lib/api";
+import { shallowEqual } from "../lib/equal";
 import { useApp } from "../lib/store";
 import { FILING_STATUS_LABELS, type FilingStatus, type HouseholdInfo } from "../lib/types";
 
@@ -23,7 +24,7 @@ export default function Settings() {
       .catch((e) => setError(String(e)));
   }, []);
 
-  const dirty = JSON.stringify(draft) !== JSON.stringify(info);
+  const dirty = !shallowEqual(draft, info);
   const set = <K extends keyof HouseholdInfo>(k: K, v: HouseholdInfo[K]) => {
     setSaved(false);
     setDraft((d) => ({ ...d, [k]: v }));

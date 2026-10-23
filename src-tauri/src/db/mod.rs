@@ -12,15 +12,18 @@ use std::path::Path;
 use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension, Row};
 
-pub use household::{clear_household, load_household, replace_household, save_info};
+pub use household::{clear_household, load_household, replace_household, save_assumptions, save_info};
 pub use records::{
     delete_account, delete_debt, delete_income, delete_one_time_expense, delete_person, upsert_account, upsert_debt,
     upsert_income, upsert_one_time_expense, upsert_person,
 };
 
 /// Ordered migrations. Never edit a shipped entry; append a new one.
-const MIGRATIONS: &[&str] =
-    &[include_str!("../../migrations/0001_init.sql"), include_str!("../../migrations/0002_household_data.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../../migrations/0001_init.sql"),
+    include_str!("../../migrations/0002_household_data.sql"),
+    include_str!("../../migrations/0003_assumptions.sql"),
+];
 
 #[derive(Debug)]
 pub enum Error {

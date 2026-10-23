@@ -107,6 +107,13 @@ string_enum!(
     }
 );
 
+impl IncomeKind {
+    /// Pay from working: keeps retirement contributions going.
+    pub fn is_earned(self) -> bool {
+        matches!(self, IncomeKind::W2 | IncomeKind::Bonus | IncomeKind::SelfEmployment)
+    }
+}
+
 string_enum!(
     DebtKind {
         Mortgage => "mortgage",
@@ -138,6 +145,41 @@ impl Default for HouseholdInfo {
             flat_state_rate: 0.0,
             filing_status: FilingStatus::Single,
             base_annual_spending: 0.0,
+        }
+    }
+}
+
+// The enum comes from `string_enum!`, which can't mark a `#[default]` variant.
+#[allow(clippy::derivable_impls)]
+impl Default for FilingStatus {
+    fn default() -> Self {
+        FilingStatus::Single
+    }
+}
+
+/// Growth and inflation assumptions for the fixed-return forecast. Nominal
+/// yearly rates as decimals.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Assumptions {
+    pub stocks_return: f64,
+    pub bonds_return: f64,
+    pub cash_return: f64,
+    pub real_estate_growth: f64,
+    pub inflation: f64,
+    /// Part of the stock return paid out as qualified dividends (taxed yearly in taxable accounts).
+    pub stock_dividend_yield: f64,
+}
+
+impl Default for Assumptions {
+    fn default() -> Self {
+        Self {
+            stocks_return: 0.07,
+            bonds_return: 0.04,
+            cash_return: 0.02,
+            real_estate_growth: 0.03,
+            inflation: 0.025,
+            stock_dividend_yield: 0.015,
         }
     }
 }
@@ -231,6 +273,8 @@ pub struct Household {
     pub income: Vec<IncomeStream>,
     pub debts: Vec<Debt>,
     pub one_time_expenses: Vec<OneTimeExpense>,
+    #[serde(default)]
+    pub assumptions: Assumptions,
 }
 
 // ---------------------------------------------------------------------------
@@ -332,10 +376,22 @@ impl OneTimeExpense {
     }
 }
 
+impl Assumptions {
+    pub fn validate(&self) -> Validation {
+        in_range("Stock return", self.stocks_return, -0.2, 0.2)?;
+        in_range("Bond return", self.bonds_return, -0.1, 0.15)?;
+        in_range("Cash return", self.cash_return, -0.05, 0.1)?;
+        in_range("Real estate growth", self.real_estate_growth, -0.1, 0.15)?;
+        in_range("Inflation", self.inflation, -0.02, 0.15)?;
+        in_range("Dividend yield", self.stock_dividend_yield, 0.0, self.stocks_return.max(0.0))
+    }
+}
+
 impl Household {
     /// Validates every record, prefixing the message with what it belongs to.
     pub fn validate(&self) -> Validation {
         self.info.validate()?;
+        self.assumptions.validate()?;
         for p in &self.people {
             p.validate().map_err(|e| format!("{}: {e}", p.name))?;
         }

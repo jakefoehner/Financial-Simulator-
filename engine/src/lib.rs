@@ -4,9 +4,10 @@
 //! unit-tested and benchmarked on its own.
 
 pub mod model;
-pub mod project;
-
-pub use project::{Allocation, FixedReturns, YearRow, project_fixed};
+pub mod projection;
+pub mod social_security;
+pub mod tax;
+pub mod tax_tables;
 
 /// Engine version, surfaced in the app's About/Settings screen.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
