@@ -18,6 +18,11 @@ function trim(n: number): string {
   return n >= 100 ? n.toFixed(0) : n.toFixed(1).replace(/\.0$/, "");
 }
 
+/** 0.03125 -> "3.13%", 0.07 -> "7%". */
+export function formatPercent(v: number, maxDecimals = 2): string {
+  return `${Number((v * 100).toFixed(maxDecimals))}%`;
+}
+
 /** Parse user-typed money like "$1,250,000" or "1.2m". Returns NaN when unparseable. */
 export function parseUsd(input: string): number {
   const s = input

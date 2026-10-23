@@ -3,6 +3,7 @@
 //! This crate is deliberately free of Tauri/DB dependencies so it can be
 //! unit-tested and benchmarked on its own.
 
+pub mod model;
 pub mod project;
 
 pub use project::{Allocation, FixedReturns, YearRow, project_fixed};

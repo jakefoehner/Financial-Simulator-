@@ -1,0 +1,169 @@
+{
+  "info": {
+    "name": "Demo: Retired in Texas",
+    "state": "TX",
+    "flatStateRate": 0,
+    "filingStatus": "single",
+    "baseAnnualSpending": 180000
+  },
+  "people": [
+    {
+      "id": 1,
+      "name": "Pat",
+      "birthYear": 1959,
+      "role": "primary",
+      "lifeExpectancy": 100,
+      "ssMonthlyBenefit": 3400,
+      "ssClaimAge": 70,
+      "ssAlreadyClaiming": false
+    },
+    {
+      "id": 2,
+      "name": "Sam",
+      "birthYear": 1995,
+      "role": "child",
+      "lifeExpectancy": 100,
+      "ssMonthlyBenefit": null,
+      "ssClaimAge": 67,
+      "ssAlreadyClaiming": false
+    },
+    {
+      "id": 3,
+      "name": "Jordan",
+      "birthYear": 1998,
+      "role": "child",
+      "lifeExpectancy": 100,
+      "ssMonthlyBenefit": null,
+      "ssClaimAge": 67,
+      "ssAlreadyClaiming": false
+    }
+  ],
+  "accounts": [
+    {
+      "id": 1,
+      "name": "Taxable brokerage",
+      "accountType": "taxable",
+      "ownerId": 1,
+      "balance": 3200000,
+      "costBasis": 1500000,
+      "stocksPct": 0.65,
+      "bondsPct": 0.3,
+      "cashPct": 0.05,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": ""
+    },
+    {
+      "id": 2,
+      "name": "Traditional IRA",
+      "accountType": "trad_ira",
+      "ownerId": 1,
+      "balance": 1450000,
+      "costBasis": null,
+      "stocksPct": 0.55,
+      "bondsPct": 0.4,
+      "cashPct": 0.05,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": "Rolled over from 401(k)"
+    },
+    {
+      "id": 3,
+      "name": "Roth IRA",
+      "accountType": "roth_ira",
+      "ownerId": 1,
+      "balance": 380000,
+      "costBasis": null,
+      "stocksPct": 0.85,
+      "bondsPct": 0.15,
+      "cashPct": 0,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": ""
+    },
+    {
+      "id": 4,
+      "name": "Checking",
+      "accountType": "checking",
+      "ownerId": 1,
+      "balance": 85000,
+      "costBasis": null,
+      "stocksPct": 0,
+      "bondsPct": 0,
+      "cashPct": 1,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": ""
+    },
+    {
+      "id": 5,
+      "name": "High-yield savings",
+      "accountType": "savings",
+      "ownerId": 1,
+      "balance": 250000,
+      "costBasis": null,
+      "stocksPct": 0,
+      "bondsPct": 0,
+      "cashPct": 1,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": ""
+    },
+    {
+      "id": 6,
+      "name": "Home",
+      "accountType": "real_estate",
+      "ownerId": 1,
+      "balance": 900000,
+      "costBasis": 420000,
+      "stocksPct": 0,
+      "bondsPct": 0,
+      "cashPct": 0,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": "Primary residence"
+    },
+    {
+      "id": 7,
+      "name": "Rental property",
+      "accountType": "real_estate",
+      "ownerId": 1,
+      "balance": 650000,
+      "costBasis": 380000,
+      "stocksPct": 0,
+      "bondsPct": 0,
+      "cashPct": 0,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": ""
+    }
+  ],
+  "income": [
+    {
+      "id": 1,
+      "personId": 1,
+      "kind": "rental",
+      "name": "Rental income (after expenses)",
+      "annualAmount": 42000,
+      "growthRate": 0.025,
+      "startAge": null,
+      "endAge": null
+    }
+  ],
+  "debts": [
+    {
+      "id": 1,
+      "name": "Rental mortgage",
+      "kind": "mortgage",
+      "balance": 210000,
+      "interestRate": 0.03125,
+      "monthlyPayment": 1650,
+      "accountId": 7,
+      "notes": ""
+    }
+  ],
+  "oneTimeExpenses": [
+    { "id": 1, "name": "Roof replacement", "year": 2027, "amount": 35000 },
+    { "id": 2, "name": "New car", "year": 2028, "amount": 65000 }
+  ]
+}

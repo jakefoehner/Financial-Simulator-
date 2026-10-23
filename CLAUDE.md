@@ -7,8 +7,10 @@ A wealthy, retired single mother in Texas, weighing estate/gift decisions (gifti
 
 ## Architecture rules
 - `engine/` is pure Rust with no Tauri, DB, or IO dependencies. All financial math lives here and gets unit tests.
-- All SQLite access goes through `src-tauri/src/db.rs`. The UI only calls Tauri commands, via `src/lib/api.ts`.
-- Migrations: append a new `src-tauri/migrations/NNNN_*.sql` and add it to `MIGRATIONS` in `db.rs`. Never edit a shipped migration.
+- The household data model lives in `engine/src/model.rs` (types + validation). `src/lib/types.ts` mirrors it by hand, so change both together.
+- All SQLite access goes through `src-tauri/src/db/`. The UI only calls Tauri commands, via `src/lib/api.ts`. Mutating commands return the full `Household`.
+- Migrations: append a new `src-tauri/migrations/NNNN_*.sql` and add it to `MIGRATIONS` in `db/mod.rs`. Never edit a shipped migration.
+- Demo households are JSON in `fixtures/`, loaded through the same validated path as real data.
 - Tax law values belong in data files (`engine/tax_tables/<year>.json`), never hard-coded.
 - Federal taxes only (plus an optional flat state rate). Planning-grade accuracy.
 - Never commit real personal data (`*.sqlite`, `*.fsim` are gitignored).

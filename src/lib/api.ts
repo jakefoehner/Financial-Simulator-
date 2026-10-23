@@ -1,5 +1,7 @@
 // Typed wrappers around Tauri commands. Keep names/shapes in sync with src-tauri/src/lib.rs.
+// Every mutation returns the freshly stored Household.
 import { invoke } from "@tauri-apps/api/core";
+import type { Account, Debt, Household, HouseholdInfo, Id, IncomeStream, OneTimeExpense, Person } from "./types";
 
 export interface AppInfo {
   appVersion: string;
@@ -8,35 +10,23 @@ export interface AppInfo {
   schemaVersion: number;
 }
 
-export interface Household {
-  name: string;
-  state: string;
-  flatStateRate: number;
-  updatedAt: string;
-}
-
-export type HouseholdUpdate = Partial<Pick<Household, "name" | "state" | "flatStateRate">>;
-
-export interface Allocation {
-  stocks: number;
-  bonds: number;
-  cash: number;
-}
-
-// Engine structs are snake_case on the Rust side.
-export interface YearRow {
-  year_index: number;
-  start_balance: number;
-  withdrawal: number;
-  growth: number;
-  end_balance: number;
-  end_balance_real: number;
-}
+export type DemoName = "retiree" | "early_career";
 
 export const api = {
   appInfo: () => invoke<AppInfo>("app_info"),
   getHousehold: () => invoke<Household>("get_household"),
-  updateHousehold: (update: HouseholdUpdate) => invoke<Household>("update_household", { update }),
-  previewProjection: (startBalance: number, allocation: Allocation, annualSpend: number, years: number) =>
-    invoke<YearRow[]>("preview_projection", { startBalance, allocation, annualSpend, years }),
+  saveHouseholdInfo: (info: HouseholdInfo) => invoke<Household>("save_household_info", { info }),
+  loadDemo: (which: DemoName) => invoke<Household>("load_demo", { which }),
+  clearHousehold: () => invoke<Household>("clear_household"),
+
+  upsertPerson: (person: Person) => invoke<Household>("upsert_person", { person }),
+  deletePerson: (id: Id) => invoke<Household>("delete_person", { id }),
+  upsertAccount: (account: Account) => invoke<Household>("upsert_account", { account }),
+  deleteAccount: (id: Id) => invoke<Household>("delete_account", { id }),
+  upsertIncome: (income: IncomeStream) => invoke<Household>("upsert_income", { income }),
+  deleteIncome: (id: Id) => invoke<Household>("delete_income", { id }),
+  upsertDebt: (debt: Debt) => invoke<Household>("upsert_debt", { debt }),
+  deleteDebt: (id: Id) => invoke<Household>("delete_debt", { id }),
+  upsertOneTimeExpense: (expense: OneTimeExpense) => invoke<Household>("upsert_one_time_expense", { expense }),
+  deleteOneTimeExpense: (id: Id) => invoke<Household>("delete_one_time_expense", { id }),
 };

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatUsd, formatUsdCompact, parseUsd } from "./format";
+import { formatPercent, formatUsd, formatUsdCompact, parseUsd } from "./format";
+
+describe("formatPercent", () => {
+  it("trims trailing zeros", () => {
+    expect(formatPercent(0.07)).toBe("7%");
+    expect(formatPercent(0.03125)).toBe("3.13%");
+  });
+});
 
 describe("formatUsd", () => {
   it("rounds to whole dollars with separators", () => {

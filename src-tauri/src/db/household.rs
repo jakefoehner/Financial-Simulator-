@@ -1,0 +1,154 @@
+//! Whole-household operations: load everything, replace everything (demo
+//! data, and later `.fsim` import), clear, and the household info row.
+
+use engine::model::{FilingStatus, Household, HouseholdInfo};
+use rusqlite::{Connection, params};
+
+use super::records::{
+    insert_account, insert_debt, insert_income, insert_one_time_expense, insert_person, list_accounts, list_debts,
+    list_income, list_one_time_expenses, list_people,
+};
+use super::{Error, Result, enum_col};
+
+/// Child tables first, so foreign keys never dangle mid-clear.
+const DATA_TABLES: &[&str] = &["one_time_expense", "debt", "income_stream", "account", "person"];
+
+pub fn load_household(conn: &Connection) -> Result<Household> {
+    Ok(Household {
+        info: get_info(conn)?,
+        people: list_people(conn)?,
+        accounts: list_accounts(conn)?,
+        income: list_income(conn)?,
+        debts: list_debts(conn)?,
+        one_time_expenses: list_one_time_expenses(conn)?,
+    })
+}
+
+fn get_info(conn: &Connection) -> Result<HouseholdInfo> {
+    Ok(conn.query_row(
+        "SELECT name, state, flat_state_rate, filing_status, base_annual_spending FROM household WHERE id = 1",
+        [],
+        |r| {
+            Ok(HouseholdInfo {
+                name: r.get(0)?,
+                state: r.get(1)?,
+                flat_state_rate: r.get(2)?,
+                filing_status: enum_col(r, 3, FilingStatus::parse)?,
+                base_annual_spending: r.get(4)?,
+            })
+        },
+    )?)
+}
+
+pub fn save_info(conn: &Connection, info: &HouseholdInfo) -> Result<()> {
+    info.validate().map_err(Error::Invalid)?;
+    conn.execute(
+        "UPDATE household SET
+             name = ?1, state = ?2, flat_state_rate = ?3, filing_status = ?4, base_annual_spending = ?5,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+         WHERE id = 1",
+        params![
+            info.name.trim(),
+            info.state,
+            info.flat_state_rate,
+            info.filing_status.as_str(),
+            info.base_annual_spending
+        ],
+    )?;
+    Ok(())
+}
+
+/// Replaces all household data in one transaction. Record ids are kept, so
+/// references between records (account owner, income person) stay intact.
+pub fn replace_household(conn: &mut Connection, h: &Household) -> Result<()> {
+    h.validate().map_err(Error::Invalid)?;
+    let tx = conn.transaction()?;
+    delete_all(&tx)?;
+    save_info(&tx, &h.info)?;
+    for p in &h.people {
+        insert_person(&tx, p)?;
+    }
+    for a in &h.accounts {
+        insert_account(&tx, a)?;
+    }
+    for i in &h.income {
+        insert_income(&tx, i)?;
+    }
+    for d in &h.debts {
+        insert_debt(&tx, d)?;
+    }
+    for x in &h.one_time_expenses {
+        insert_one_time_expense(&tx, x)?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Deletes every record and resets the household info to defaults.
+pub fn clear_household(conn: &mut Connection) -> Result<()> {
+    let tx = conn.transaction()?;
+    delete_all(&tx)?;
+    save_info(&tx, &HouseholdInfo::default())?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn delete_all(conn: &Connection) -> Result<()> {
+    for t in DATA_TABLES {
+        conn.execute(&format!("DELETE FROM {t}"), [])?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_in_memory;
+    use crate::demo;
+
+    #[test]
+    fn info_round_trip_and_validation() {
+        let conn = open_in_memory().unwrap();
+        let mut info = load_household(&conn).unwrap().info;
+        assert_eq!(info, HouseholdInfo::default());
+
+        info.name = "Foehner Family".into();
+        info.base_annual_spending = 150_000.0;
+        info.filing_status = FilingStatus::HeadOfHousehold;
+        save_info(&conn, &info).unwrap();
+        assert_eq!(load_household(&conn).unwrap().info, info);
+
+        info.name = "  ".into();
+        assert!(matches!(save_info(&conn, &info), Err(Error::Invalid(_))));
+    }
+
+    #[test]
+    fn replace_then_load_is_lossless_for_every_demo() {
+        for which in demo::Demo::ALL {
+            let mut conn = open_in_memory().unwrap();
+            let h = demo::household(*which);
+            replace_household(&mut conn, &h).unwrap();
+            assert_eq!(load_household(&conn).unwrap(), h, "demo {which:?} did not round-trip");
+        }
+    }
+
+    #[test]
+    fn replace_rolls_back_on_invalid_data() {
+        let mut conn = open_in_memory().unwrap();
+        let good = demo::household(demo::Demo::Retiree);
+        replace_household(&mut conn, &good).unwrap();
+
+        let mut bad = demo::household(demo::Demo::EarlyCareer);
+        bad.accounts[0].balance = -5.0;
+        assert!(replace_household(&mut conn, &bad).is_err());
+        assert_eq!(load_household(&conn).unwrap(), good);
+    }
+
+    #[test]
+    fn clear_removes_everything() {
+        let mut conn = open_in_memory().unwrap();
+        replace_household(&mut conn, &demo::household(demo::Demo::Retiree)).unwrap();
+        clear_household(&mut conn).unwrap();
+        assert_eq!(load_household(&conn).unwrap(), Household::default());
+    }
+}

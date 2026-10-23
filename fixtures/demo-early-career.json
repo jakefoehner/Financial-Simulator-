@@ -1,0 +1,169 @@
+{
+  "info": {
+    "name": "Demo: Early career",
+    "state": "TX",
+    "flatStateRate": 0,
+    "filingStatus": "single",
+    "baseAnnualSpending": 55000
+  },
+  "people": [
+    {
+      "id": 1,
+      "name": "Alex",
+      "birthYear": 1998,
+      "role": "primary",
+      "lifeExpectancy": 100,
+      "ssMonthlyBenefit": 2700,
+      "ssClaimAge": 67,
+      "ssAlreadyClaiming": false
+    }
+  ],
+  "accounts": [
+    {
+      "id": 1,
+      "name": "401(k)",
+      "accountType": "trad_401k",
+      "ownerId": 1,
+      "balance": 48000,
+      "costBasis": null,
+      "stocksPct": 0.9,
+      "bondsPct": 0.1,
+      "cashPct": 0,
+      "annualContribution": 12000,
+      "employerMatch": 4500,
+      "notes": ""
+    },
+    {
+      "id": 2,
+      "name": "Roth IRA",
+      "accountType": "roth_ira",
+      "ownerId": 1,
+      "balance": 21000,
+      "costBasis": null,
+      "stocksPct": 1,
+      "bondsPct": 0,
+      "cashPct": 0,
+      "annualContribution": 7000,
+      "employerMatch": 0,
+      "notes": ""
+    },
+    {
+      "id": 3,
+      "name": "HSA",
+      "accountType": "hsa",
+      "ownerId": 1,
+      "balance": 6500,
+      "costBasis": null,
+      "stocksPct": 0.8,
+      "bondsPct": 0,
+      "cashPct": 0.2,
+      "annualContribution": 4300,
+      "employerMatch": 0,
+      "notes": ""
+    },
+    {
+      "id": 4,
+      "name": "Checking",
+      "accountType": "checking",
+      "ownerId": 1,
+      "balance": 9000,
+      "costBasis": null,
+      "stocksPct": 0,
+      "bondsPct": 0,
+      "cashPct": 1,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": ""
+    },
+    {
+      "id": 5,
+      "name": "Emergency fund",
+      "accountType": "savings",
+      "ownerId": 1,
+      "balance": 24000,
+      "costBasis": null,
+      "stocksPct": 0,
+      "bondsPct": 0,
+      "cashPct": 1,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": ""
+    },
+    {
+      "id": 6,
+      "name": "Brokerage",
+      "accountType": "taxable",
+      "ownerId": 1,
+      "balance": 15000,
+      "costBasis": 11000,
+      "stocksPct": 1,
+      "bondsPct": 0,
+      "cashPct": 0,
+      "annualContribution": 3000,
+      "employerMatch": 0,
+      "notes": ""
+    },
+    {
+      "id": 7,
+      "name": "Crypto",
+      "accountType": "crypto",
+      "ownerId": 1,
+      "balance": 4000,
+      "costBasis": 5000,
+      "stocksPct": 1,
+      "bondsPct": 0,
+      "cashPct": 0,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": ""
+    }
+  ],
+  "income": [
+    {
+      "id": 1,
+      "personId": 1,
+      "kind": "w2",
+      "name": "Salary",
+      "annualAmount": 92000,
+      "growthRate": 0.04,
+      "startAge": null,
+      "endAge": 65
+    },
+    {
+      "id": 2,
+      "personId": 1,
+      "kind": "bonus",
+      "name": "Annual bonus",
+      "annualAmount": 7500,
+      "growthRate": 0.04,
+      "startAge": null,
+      "endAge": 65
+    }
+  ],
+  "debts": [
+    {
+      "id": 1,
+      "name": "Student loans",
+      "kind": "student_loan",
+      "balance": 26000,
+      "interestRate": 0.055,
+      "monthlyPayment": 310,
+      "accountId": null,
+      "notes": ""
+    },
+    {
+      "id": 2,
+      "name": "Car loan",
+      "kind": "auto",
+      "balance": 14500,
+      "interestRate": 0.069,
+      "monthlyPayment": 420,
+      "accountId": null,
+      "notes": ""
+    }
+  ],
+  "oneTimeExpenses": [
+    { "id": 1, "name": "Wedding", "year": 2028, "amount": 30000 },
+    { "id": 2, "name": "House down payment", "year": 2030, "amount": 80000 }
+  ]
+}
