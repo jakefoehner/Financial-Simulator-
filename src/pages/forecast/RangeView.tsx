@@ -5,7 +5,7 @@ import { FanChart } from "../../components/FanChart";
 import { MethodNote } from "../../components/MethodNote";
 import { api } from "../../lib/api";
 import { formatUsd, formatUsdCompact } from "../../lib/format";
-import type { DollarMode, Tone } from "../../lib/projection";
+import type { DollarMode, EstateResult, Tone } from "../../lib/projection";
 import {
   fanRows,
   outOf100,
@@ -16,7 +16,8 @@ import {
   type Representative,
   type Simulation,
 } from "../../lib/simulation";
-import type { Household } from "../../lib/types";
+import type { Household, Id } from "../../lib/types";
+import FamilyCard from "./FamilyCard";
 import ScenarioDetailView from "./ScenarioDetail";
 import { dollarsLabel, money, StatusTile, Tile } from "./shared";
 
@@ -30,26 +31,29 @@ export default function RangeView({
   household,
   startYear,
   mode,
+  plan,
   onError,
 }: {
   household: Household;
   startYear: number;
   mode: DollarMode;
+  plan: Id | null;
   onError: (e: string) => void;
 }) {
   const [sim, setSim] = useState<Simulation | null>(null);
   const [selected, setSelected] = useState<Representative | null>(null);
+  const [estate, setEstate] = useState<EstateResult | null>(null);
 
   useEffect(() => {
-    api
-      .runSimulation(startYear)
-      .then((s) => {
+    Promise.all([api.runSimulation(startYear, plan), api.runProjection(startYear, plan)])
+      .then(([s, p]) => {
         setSim(s);
+        setEstate(p.summary.estate);
         // Keep the zoomed-in scenario open across edits, re-pointed at the new run.
         setSelected((cur) => (cur ? (s.representatives.find((r) => r.kind === cur.kind) ?? null) : null));
       })
       .catch((e) => onError(String(e)));
-  }, [household, startYear, onError]);
+  }, [household, startYear, plan, onError]);
 
   const rows = useMemo(() => (sim ? fanRows(sim, mode) : []), [sim, mode]);
   if (!sim) {
@@ -106,6 +110,8 @@ export default function RangeView({
 
       <FanCard rows={rows} mode={mode} />
 
+      {estate && <FamilyCard estate={estate} range={sim.estate} />}
+
       <Card title="Zoom in on a scenario">
         <p className="mb-3 text-sm text-[var(--muted)]">
           See one scenario year by year, including exactly which real market years it replayed.
@@ -139,6 +145,7 @@ export default function RangeView({
         <ScenarioDetailView
           key={`${selected.kind}-${selected.pathIndex}`}
           household={household}
+          plan={plan}
           startYear={startYear}
           representative={selected}
           mode={mode}

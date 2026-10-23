@@ -6,11 +6,12 @@ import {
   savingsVerdict,
   startLevels,
   type Projection,
+  type Summary,
   type YearResult,
 } from "./projection";
 
 function year(overrides: Partial<YearResult>): YearResult {
-  const zero = { cash: 0, taxable: 0, taxDeferred: 0, taxFree: 0, realEstate: 0, education: 0 };
+  const zero = { cash: 0, taxable: 0, taxDeferred: 0, taxFree: 0, realEstate: 0, education: 0, loansReceivable: 0 };
   return {
     year: 2026,
     age: 67,
@@ -33,6 +34,15 @@ function year(overrides: Partial<YearResult>): YearResult {
     debtBalance: 0,
     netWorth: 0,
     priceLevel: 1.025,
+    gifts: 0,
+    giftsByChild: [],
+    giftTax: 0,
+    cashGifts: 0,
+    loansMade: 0,
+    loanReceipts: 0,
+    rothConversion: 0,
+    lifetimeTaxableGifts: 0,
+    portfolioReturn: 0,
     ...overrides,
   };
 }
@@ -51,6 +61,7 @@ describe("savingsVerdict", () => {
     lowestInvestableAge: null,
     endingNetWorthReal: 0,
     endingInvestableReal: 6_000_000,
+    estate: {} as Summary["estate"],
   };
   const fmt = (v: number) => `${v / 1e6}M`;
 
@@ -92,7 +103,7 @@ describe("inDollars", () => {
 describe("rows", () => {
   it("folds 529s into the real-estate band and keeps net worth", () => {
     const y = year({
-      balances: { cash: 1, taxable: 2, taxDeferred: 3, taxFree: 4, realEstate: 5, education: 6 },
+      balances: { cash: 1, taxable: 2, taxDeferred: 3, taxFree: 4, realEstate: 5, education: 6, loansReceivable: 0 },
       netWorth: 21,
       priceLevel: 1,
     });

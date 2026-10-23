@@ -16,13 +16,13 @@ import Debts from "./pages/Debts";
 import Income from "./pages/Income";
 import Overview from "./pages/Overview";
 import People from "./pages/People";
-import Placeholder from "./pages/Placeholder";
 import Settings from "./pages/Settings";
 import Results from "./pages/Results";
+import Scenarios from "./pages/scenarios/Scenarios";
 import Spending from "./pages/Spending";
 import { useApp, type Section } from "./lib/store";
 
-const NAV: { id: Section; label: string; icon: LucideIcon; phase?: number }[][] = [
+const NAV: { id: Section; label: string; icon: LucideIcon }[][] = [
   [{ id: "overview", label: "Overview", icon: House }],
   [
     { id: "people", label: "People", icon: Users },
@@ -33,12 +33,12 @@ const NAV: { id: Section; label: string; icon: LucideIcon; phase?: number }[][] 
   ],
   [
     { id: "results", label: "Forecast", icon: ChartLine },
-    { id: "scenarios", label: "Scenarios", icon: GitBranch, phase: 4 },
+    { id: "scenarios", label: "Scenarios", icon: GitBranch },
   ],
   [{ id: "settings", label: "Settings", icon: SettingsIcon }],
 ];
 
-const PAGES: Partial<Record<Section, () => React.JSX.Element | null>> = {
+const PAGES: Record<Section, () => React.JSX.Element | null> = {
   overview: Overview,
   people: People,
   accounts: Accounts,
@@ -46,6 +46,7 @@ const PAGES: Partial<Record<Section, () => React.JSX.Element | null>> = {
   debts: Debts,
   spending: Spending,
   results: Results,
+  scenarios: Scenarios,
   settings: Settings,
 };
 
@@ -56,7 +57,6 @@ export default function App() {
     void load();
   }, [load]);
 
-  const current = NAV.flat().find((n) => n.id === section)!;
   const Page = PAGES[section];
 
   return (
@@ -85,10 +85,8 @@ export default function App() {
         <div className="mx-auto max-w-5xl">
           {loadError ? (
             <p className="text-sm text-red-600 dark:text-red-400">Couldn't open your data: {loadError}</p>
-          ) : !household ? null : Page ? (
+          ) : !household ? null : (
             <Page />
-          ) : (
-            <Placeholder title={current.label} phase={current.phase!} />
           )}
         </div>
       </main>

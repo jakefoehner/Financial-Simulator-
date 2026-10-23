@@ -11,7 +11,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 
 use crate::history::{self, CenteredYear, HistoricalYear};
-use crate::model::Household;
+use crate::model::{Event, Household, Id};
 use crate::projection::{self, MarketYear, Projection, ProjectionError};
 use crate::tax_tables::TaxTables;
 
@@ -69,6 +69,41 @@ pub struct Simulation {
     pub net_worth_real: Bands,
     pub net_worth_nominal: Bands,
     pub representatives: Vec<Representative>,
+    pub estate: EstateRange,
+}
+
+/// 10th / 50th / 90th percentile of one number across scenarios.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Spread {
+    pub p10: f64,
+    pub p50: f64,
+    pub p90: f64,
+}
+
+impl Spread {
+    fn of(mut xs: Vec<f64>) -> Spread {
+        xs.sort_by(f64::total_cmp);
+        Spread { p10: percentile(&xs, 0.1), p50: percentile(&xs, 0.5), p90: percentile(&xs, 0.9) }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChildRange {
+    pub child_id: Option<Id>,
+    pub name: String,
+    pub total_real: Spread,
+}
+
+/// What the estate and family look like across scenarios (today's dollars).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EstateRange {
+    pub age: u32,
+    pub estate_tax_real: Spread,
+    pub family_total_real: Spread,
+    pub children: Vec<ChildRange>,
 }
 
 /// Compact per-scenario results; full detail is re-computed on demand.
@@ -79,6 +114,9 @@ struct PathOutcome {
     net_worth_nominal: Vec<f64>,
     runs_out_at: Option<usize>,
     runs_out_at_age: Option<u32>,
+    estate_tax_real: f64,
+    family_total_real: f64,
+    child_totals_real: Vec<f64>,
 }
 
 impl PathOutcome {
@@ -101,6 +139,7 @@ fn scenario_market(table: &[CenteredYear], picks: &[usize]) -> impl Fn(usize) ->
 
 fn run_path(
     h: &Household,
+    events: &[Event],
     start_year: i32,
     t: &TaxTables,
     table: &[CenteredYear],
@@ -108,18 +147,20 @@ fn run_path(
     index: usize,
 ) -> Result<(Projection, Vec<usize>), ProjectionError> {
     let picks = history::sample_path(&mut path_rng(index), table.len(), horizon);
-    let proj = projection::project_market(h, start_year, t, scenario_market(table, &picks))?;
+    let proj = projection::project_market(h, events, start_year, t, scenario_market(table, &picks))?;
     Ok((proj, picks))
 }
 
-/// Runs `h.assumptions.simulations` scenarios.
-pub fn simulate(h: &Household, start_year: i32) -> Result<Simulation, ProjectionError> {
+/// Runs `h.assumptions.simulations` scenarios of the plan `scenario` (`None` = base plan).
+pub fn simulate(h: &Household, scenario: Option<Id>, start_year: i32) -> Result<Simulation, ProjectionError> {
     let table = history::centered(&h.assumptions);
-    simulate_with(h, start_year, TaxTables::current(), &table, h.assumptions.simulations as usize)
+    let events = projection::events_for(h, scenario)?;
+    simulate_with(h, &events, start_year, TaxTables::current(), &table, h.assumptions.simulations as usize)
 }
 
 pub fn simulate_with(
     h: &Household,
+    events: &[Event],
     start_year: i32,
     t: &TaxTables,
     table: &[CenteredYear],
@@ -129,7 +170,7 @@ pub fn simulate_with(
     let outcomes: Vec<PathOutcome> = (0..scenarios)
         .into_par_iter()
         .map(|i| {
-            let (p, _) = run_path(h, start_year, t, table, horizon, i)?;
+            let (p, _) = run_path(h, events, start_year, t, table, horizon, i)?;
             let runs_out_at = p.years.iter().position(|y| y.shortfall > 1.0);
             Ok(PathOutcome {
                 investable_real: p.years.iter().map(|y| y.investable_real()).collect(),
@@ -138,12 +179,15 @@ pub fn simulate_with(
                 net_worth_nominal: p.years.iter().map(|y| y.net_worth).collect(),
                 runs_out_at,
                 runs_out_at_age: runs_out_at.map(|i| p.years[i].age),
+                estate_tax_real: p.summary.estate.estate_tax_real,
+                family_total_real: p.summary.estate.family_total_real,
+                child_totals_real: p.summary.estate.children.iter().map(|c| c.total_real).collect(),
             })
         })
         .collect::<Result<_, ProjectionError>>()?;
 
     // Ages/years and the starting point are the same in every scenario; take them from the steady path.
-    let steady = projection::project_market(h, start_year, t, |_| MarketYear::steady(&h.assumptions))?;
+    let steady = projection::project_market(h, events, start_year, t, |_| MarketYear::steady(&h.assumptions))?;
     let starting = steady.summary.starting_investable;
     let n = scenarios.max(1) as f64;
 
@@ -188,6 +232,23 @@ pub fn simulate_with(
         net_worth_real: bands(&outcomes, horizon, |o| &o.net_worth_real),
         net_worth_nominal: bands(&outcomes, horizon, |o| &o.net_worth_nominal),
         representatives,
+        estate: EstateRange {
+            age: steady.summary.estate.age,
+            estate_tax_real: Spread::of(outcomes.iter().map(|o| o.estate_tax_real).collect()),
+            family_total_real: Spread::of(outcomes.iter().map(|o| o.family_total_real).collect()),
+            children: steady
+                .summary
+                .estate
+                .children
+                .iter()
+                .enumerate()
+                .map(|(k, c)| ChildRange {
+                    child_id: c.child_id,
+                    name: c.name.clone(),
+                    total_real: Spread::of(outcomes.iter().map(|o| o.child_totals_real[k]).collect()),
+                })
+                .collect(),
+        },
     })
 }
 
@@ -238,10 +299,16 @@ pub struct ScenarioDetail {
 }
 
 /// Re-runs one scenario in full: every year's results plus what it replayed.
-pub fn scenario_detail(h: &Household, start_year: i32, path_index: usize) -> Result<ScenarioDetail, ProjectionError> {
+pub fn scenario_detail(
+    h: &Household,
+    scenario: Option<Id>,
+    start_year: i32,
+    path_index: usize,
+) -> Result<ScenarioDetail, ProjectionError> {
     let table = history::centered(&h.assumptions);
+    let events = projection::events_for(h, scenario)?;
     let horizon = projection::horizon_years(h, start_year)?;
-    let (projection, picks) = run_path(h, start_year, TaxTables::current(), &table, horizon, path_index)?;
+    let (projection, picks) = run_path(h, &events, start_year, TaxTables::current(), &table, horizon, path_index)?;
     let replayed = projection
         .years
         .iter()
@@ -295,7 +362,7 @@ mod tests {
 
     fn run(h: &Household, n: usize) -> Simulation {
         let table = history::centered(&h.assumptions);
-        simulate_with(h, 2026, TaxTables::current(), &table, n).unwrap()
+        simulate_with(h, &[], 2026, TaxTables::current(), &table, n).unwrap()
     }
 
     #[test]
@@ -315,8 +382,8 @@ mod tests {
             .iter()
             .map(|y| CenteredYear { actual: *y, market: MarketYear::steady(&h.assumptions) })
             .collect();
-        let sim = simulate_with(&h, 2026, TaxTables::current(), &flat, 20).unwrap();
-        let steady = projection::project(&h, 2026).unwrap();
+        let sim = simulate_with(&h, &[], 2026, TaxTables::current(), &flat, 20).unwrap();
+        let steady = projection::project(&h, None, 2026).unwrap();
         for (i, y) in steady.years.iter().enumerate() {
             assert!((sim.investable_real.p10[i] - y.investable_real()).abs() < 1e-6);
             assert!((sim.investable_real.p90[i] - y.investable_real()).abs() < 1e-6);
@@ -354,7 +421,7 @@ mod tests {
         let kinds: Vec<_> = sim.representatives.iter().map(|r| r.kind).collect();
         assert_eq!(kinds, [ScenarioKind::Worst, ScenarioKind::Rough, ScenarioKind::Typical, ScenarioKind::Strong]);
         let typical = &sim.representatives[2];
-        let detail = scenario_detail(&h, 2026, typical.path_index).unwrap();
+        let detail = scenario_detail(&h, None, 2026, typical.path_index).unwrap();
         let last = detail.projection.years.last().unwrap();
         assert!((last.investable_real() - typical.ending_investable_real).abs() < 1e-6);
         // Replayed years come in runs of consecutive real years.

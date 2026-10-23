@@ -5,7 +5,9 @@
     "One Big Beautiful Bill Act (2025): senior deduction 2025-2028, child tax credit",
     "SSA 2026 wage base announcement ($184,500)",
     "CMS 2026 Medicare Parts A & B premiums fact sheet (IRMAA tiers)",
-    "IRS Uniform Lifetime Table (Treas. Reg. 1.401(a)(9)-9, effective 2022); SECURE 2.0 RMD ages"
+    "IRS Uniform Lifetime Table (Treas. Reg. 1.401(a)(9)-9, effective 2022); SECURE 2.0 RMD ages",
+    "Estate & gift: One Big Beautiful Bill Act (2025) sets a permanent $15M exemption for 2026, indexed from 2027; IRS Rev. Proc. 2025-32 keeps the annual exclusion at $19,000",
+    "AFR: IRS Rev. Rul. 2026-21, Table 1 (November 2026), annual compounding"
   ],
   "notes": "Amounts marked indexed grow with the simulation's inflation assumption after 2026. Statutory amounts (NIIT, additional Medicare, Social Security taxation, child tax credit phase-out) are not indexed by law.",
 
@@ -133,6 +135,21 @@
       { "single_over": 499999, "joint_over": 749999, "part_b": 487.0, "part_d": 91.0 }
     ],
     "medicare_age": 65
+  },
+
+  "estate_gift": {
+    "comment": "Federal only (Texas has no estate or inheritance tax). Exemption and exclusion are indexed for inflation; the exclusion rounds down to $1,000.",
+    "exemption": 15000000,
+    "annual_exclusion": 19000,
+    "top_rate": 0.40
+  },
+
+  "afr": {
+    "comment": "Minimum interest rates for family loans (applicable federal rates), November 2026. Short-term: up to 3 years; mid-term: over 3 and up to 9; long-term: over 9.",
+    "month": "2026-11",
+    "short_term": 0.0467,
+    "mid_term": 0.0508,
+    "long_term": 0.0552
   },
 
   "rmd": {

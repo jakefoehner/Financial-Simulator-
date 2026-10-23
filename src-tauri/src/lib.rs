@@ -4,7 +4,9 @@ mod demo;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use engine::model::{Account, Assumptions, Debt, Household, HouseholdInfo, Id, IncomeStream, OneTimeExpense, Person};
+use engine::model::{
+    Account, Assumptions, Debt, Household, HouseholdInfo, Id, IncomeStream, OneTimeExpense, Person, Scenario,
+};
 use engine::montecarlo::{self, ScenarioDetail, Simulation};
 use engine::projection::{self, ClaimAgeOutcome, Projection};
 use rusqlite::Connection;
@@ -17,13 +19,17 @@ use tauri::{Manager, State};
 struct AppState {
     conn: Mutex<Connection>,
     db_path: PathBuf,
-    /// Last range-of-outcomes result, keyed by a hash of (household, start year).
-    simulation_cache: Mutex<Option<(u64, Arc<Simulation>)>>,
+    /// Recent range-of-outcomes results, keyed by a hash of (household, plan, start year),
+    /// so switching between plans or comparing them doesn't re-run.
+    simulation_cache: Mutex<Vec<(u64, Arc<Simulation>)>>,
 }
 
-fn cache_key(h: &Household, start_year: i32) -> u64 {
+const SIMULATION_CACHE_SIZE: usize = 8;
+
+fn cache_key(h: &Household, scenario: Option<Id>, start_year: i32) -> u64 {
     let mut hasher = DefaultHasher::new();
     serde_json::to_string(h).unwrap_or_default().hash(&mut hasher);
+    scenario.hash(&mut hasher);
     start_year.hash(&mut hasher);
     hasher.finish()
 }
@@ -79,51 +85,104 @@ fn save_assumptions(state: State<AppState>, assumptions: Assumptions) -> CmdResu
     mutate(&state, |c| db::save_assumptions(c, &assumptions))
 }
 
+/// Current-law gift/estate figures and family-loan rates, from engine/tax_tables, for form hints.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaxFacts {
+    tax_year: i32,
+    annual_exclusion: f64,
+    exemption: f64,
+    afr_month: String,
+    afr_short_term: f64,
+    afr_mid_term: f64,
+    afr_long_term: f64,
+}
+
+#[tauri::command]
+fn tax_facts() -> TaxFacts {
+    let t = engine::tax_tables::TaxTables::current();
+    TaxFacts {
+        tax_year: t.year,
+        annual_exclusion: t.estate_gift.annual_exclusion,
+        exemption: t.estate_gift.exemption,
+        afr_month: t.afr.month.clone(),
+        afr_short_term: t.afr.short_term,
+        afr_mid_term: t.afr.mid_term,
+        afr_long_term: t.afr.long_term,
+    }
+}
+
+#[tauri::command]
+fn save_scenario(state: State<AppState>, scenario: Scenario) -> CmdResult<Household> {
+    mutate(&state, |c| db::upsert_scenario(c, &scenario).map(drop))
+}
+
+#[tauri::command]
+fn delete_scenario(state: State<AppState>, id: Id) -> CmdResult<Household> {
+    mutate(&state, |c| db::delete_scenario(c, id))
+}
+
 /// `start_year` comes from the UI's clock so results match what the user sees as "this year".
+/// `scenario` is a plan id; `None` is the base plan.
 #[tauri::command]
-fn run_projection(state: State<AppState>, start_year: i32) -> CmdResult<Projection> {
+fn run_projection(state: State<AppState>, start_year: i32, scenario: Option<Id>) -> CmdResult<Projection> {
     let household = get_household(state)?;
-    projection::project(&household, start_year).map_err(err)
+    projection::project(&household, scenario, start_year).map_err(err)
 }
 
 #[tauri::command]
-fn compare_claim_ages(state: State<AppState>, start_year: i32) -> CmdResult<Vec<ClaimAgeOutcome>> {
+fn compare_claim_ages(
+    state: State<AppState>,
+    start_year: i32,
+    scenario: Option<Id>,
+) -> CmdResult<Vec<ClaimAgeOutcome>> {
     let household = get_household(state)?;
-    projection::compare_claim_ages(&household, start_year).map_err(err)
+    projection::compare_claim_ages(&household, scenario, start_year).map_err(err)
 }
 
-/// Runs the range of outcomes off the main thread; reuses the last result if nothing changed.
+/// Runs the range of outcomes off the main thread; reuses a recent result if nothing changed.
 #[tauri::command]
-async fn run_simulation(state: State<'_, AppState>, start_year: i32) -> CmdResult<Arc<Simulation>> {
+async fn run_simulation(
+    state: State<'_, AppState>,
+    start_year: i32,
+    scenario: Option<Id>,
+) -> CmdResult<Arc<Simulation>> {
     let household = {
         let conn = state.conn.lock().map_err(err)?;
         db::load_household(&conn).map_err(err)?
     };
-    let key = cache_key(&household, start_year);
-    if let Some((k, sim)) = state.simulation_cache.lock().map_err(err)?.as_ref()
-        && *k == key
-    {
+    let key = cache_key(&household, scenario, start_year);
+    if let Some((_, sim)) = state.simulation_cache.lock().map_err(err)?.iter().find(|(k, _)| *k == key) {
         return Ok(sim.clone());
     }
-    let sim = tauri::async_runtime::spawn_blocking(move || montecarlo::simulate(&household, start_year))
+    let sim = tauri::async_runtime::spawn_blocking(move || montecarlo::simulate(&household, scenario, start_year))
         .await
         .map_err(err)?
         .map_err(err)?;
     let sim = Arc::new(sim);
-    *state.simulation_cache.lock().map_err(err)? = Some((key, sim.clone()));
+    let mut cache = state.simulation_cache.lock().map_err(err)?;
+    cache.insert(0, (key, sim.clone()));
+    cache.truncate(SIMULATION_CACHE_SIZE);
     Ok(sim)
 }
 
 #[tauri::command]
-async fn scenario_detail(state: State<'_, AppState>, start_year: i32, path_index: usize) -> CmdResult<ScenarioDetail> {
+async fn scenario_detail(
+    state: State<'_, AppState>,
+    start_year: i32,
+    path_index: usize,
+    scenario: Option<Id>,
+) -> CmdResult<ScenarioDetail> {
     let household = {
         let conn = state.conn.lock().map_err(err)?;
         db::load_household(&conn).map_err(err)?
     };
-    tauri::async_runtime::spawn_blocking(move || montecarlo::scenario_detail(&household, start_year, path_index))
-        .await
-        .map_err(err)?
-        .map_err(err)
+    tauri::async_runtime::spawn_blocking(move || {
+        montecarlo::scenario_detail(&household, scenario, start_year, path_index)
+    })
+    .await
+    .map_err(err)?
+    .map_err(err)
 }
 
 #[tauri::command]
@@ -194,7 +253,7 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let db_path = dir.join("household.sqlite");
             let conn = db::open(&db_path)?;
-            app.manage(AppState { conn: Mutex::new(conn), db_path, simulation_cache: Mutex::new(None) });
+            app.manage(AppState { conn: Mutex::new(conn), db_path, simulation_cache: Mutex::new(Vec::new()) });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -202,6 +261,9 @@ pub fn run() {
             get_household,
             save_household_info,
             save_assumptions,
+            tax_facts,
+            save_scenario,
+            delete_scenario,
             run_projection,
             compare_claim_ages,
             run_simulation,

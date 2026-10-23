@@ -5,13 +5,13 @@ use engine::model::{Assumptions, FilingStatus, Household, HouseholdInfo};
 use rusqlite::{Connection, params};
 
 use super::records::{
-    insert_account, insert_debt, insert_income, insert_one_time_expense, insert_person, list_accounts, list_debts,
-    list_income, list_one_time_expenses, list_people,
+    insert_account, insert_debt, insert_income, insert_one_time_expense, insert_person, insert_scenario, list_accounts,
+    list_debts, list_income, list_one_time_expenses, list_people, list_scenarios,
 };
 use super::{Error, Result, enum_col};
 
 /// Child tables first, so foreign keys never dangle mid-clear.
-const DATA_TABLES: &[&str] = &["one_time_expense", "debt", "income_stream", "account", "person"];
+const DATA_TABLES: &[&str] = &["scenario", "one_time_expense", "debt", "income_stream", "account", "person"];
 
 pub fn load_household(conn: &Connection) -> Result<Household> {
     Ok(Household {
@@ -22,13 +22,15 @@ pub fn load_household(conn: &Connection) -> Result<Household> {
         debts: list_debts(conn)?,
         one_time_expenses: list_one_time_expenses(conn)?,
         assumptions: get_assumptions(conn)?,
+        scenarios: list_scenarios(conn)?,
     })
 }
 
 fn get_assumptions(conn: &Connection) -> Result<Assumptions> {
     Ok(conn.query_row(
         "SELECT stocks_return, bonds_return, cash_return, real_estate_growth, inflation, stock_dividend_yield,
-                simulations, steady_inflation
+                simulations, steady_inflation, heir_income_tax_rate, exemption_cut_enabled, exemption_cut_amount,
+                exemption_cut_year, estate_age
          FROM assumptions WHERE id = 1",
         [],
         |r| {
@@ -41,6 +43,11 @@ fn get_assumptions(conn: &Connection) -> Result<Assumptions> {
                 stock_dividend_yield: r.get(5)?,
                 simulations: r.get(6)?,
                 steady_inflation: r.get(7)?,
+                heir_income_tax_rate: r.get(8)?,
+                exemption_cut_enabled: r.get(9)?,
+                exemption_cut_amount: r.get(10)?,
+                exemption_cut_year: r.get(11)?,
+                estate_age: r.get(12)?,
             })
         },
     )?)
@@ -50,7 +57,9 @@ pub fn save_assumptions(conn: &Connection, a: &Assumptions) -> Result<()> {
     a.validate().map_err(Error::Invalid)?;
     conn.execute(
         "UPDATE assumptions SET stocks_return = ?1, bonds_return = ?2, cash_return = ?3, real_estate_growth = ?4,
-             inflation = ?5, stock_dividend_yield = ?6, simulations = ?7, steady_inflation = ?8
+             inflation = ?5, stock_dividend_yield = ?6, simulations = ?7, steady_inflation = ?8,
+             heir_income_tax_rate = ?9, exemption_cut_enabled = ?10, exemption_cut_amount = ?11,
+             exemption_cut_year = ?12, estate_age = ?13
          WHERE id = 1",
         params![
             a.stocks_return,
@@ -60,7 +69,12 @@ pub fn save_assumptions(conn: &Connection, a: &Assumptions) -> Result<()> {
             a.inflation,
             a.stock_dividend_yield,
             a.simulations,
-            a.steady_inflation
+            a.steady_inflation,
+            a.heir_income_tax_rate,
+            a.exemption_cut_enabled,
+            a.exemption_cut_amount,
+            a.exemption_cut_year,
+            a.estate_age
         ],
     )?;
     Ok(())
@@ -122,6 +136,9 @@ pub fn replace_household(conn: &mut Connection, h: &Household) -> Result<()> {
     }
     for x in &h.one_time_expenses {
         insert_one_time_expense(&tx, x)?;
+    }
+    for sc in &h.scenarios {
+        insert_scenario(&tx, sc)?;
     }
     tx.commit()?;
     Ok(())

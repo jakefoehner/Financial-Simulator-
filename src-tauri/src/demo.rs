@@ -50,31 +50,48 @@ mod tests {
         use engine::projection::{compare_claim_ages, project};
         let path = std::env::var("FSIM_DUMP").expect("set FSIM_DUMP to an output path");
         let h = household(Demo::Retiree);
-        let sim = simulate(&h, 2026).unwrap();
-        // Scenario details keyed "scenario_detail:<pathIndex>" for the preview mock.
-        let details: serde_json::Map<String, serde_json::Value> = sim
-            .representatives
-            .iter()
-            .map(|r| {
-                let d = scenario_detail(&h, 2026, r.path_index).unwrap();
-                (format!("scenario_detail:{}", r.path_index), serde_json::to_value(d).unwrap())
-            })
-            .collect();
+        let t = engine::tax_tables::TaxTables::current();
         let mut json = serde_json::json!({
             "get_household": h,
-            "run_projection": project(&h, 2026).unwrap(),
-            "compare_claim_ages": compare_claim_ages(&h, 2026).unwrap(),
-            "run_simulation": sim,
+            "tax_facts": {
+                "taxYear": t.year,
+                "annualExclusion": t.estate_gift.annual_exclusion,
+                "exemption": t.estate_gift.exemption,
+                "afrMonth": t.afr.month,
+                "afrShortTerm": t.afr.short_term,
+                "afrMidTerm": t.afr.mid_term,
+                "afrLongTerm": t.afr.long_term,
+            },
         });
-        json.as_object_mut().unwrap().extend(details);
+        let out = json.as_object_mut().unwrap();
+        // Keyed "<command>:<plan>" (plan = "base" or a scenario id) for the preview mock.
+        let mut plans: Vec<Option<engine::model::Id>> = vec![None];
+        plans.extend(h.scenarios.iter().map(|s| s.id));
+        for plan in plans {
+            let key = plan.map_or("base".to_string(), |id| id.to_string());
+            let sim = simulate(&h, plan, 2026).unwrap();
+            for r in &sim.representatives {
+                let d = scenario_detail(&h, plan, 2026, r.path_index).unwrap();
+                out.insert(format!("scenario_detail:{key}:{}", r.path_index), serde_json::to_value(d).unwrap());
+            }
+            out.insert(
+                format!("run_projection:{key}"),
+                serde_json::to_value(project(&h, plan, 2026).unwrap()).unwrap(),
+            );
+            out.insert(
+                format!("compare_claim_ages:{key}"),
+                serde_json::to_value(compare_claim_ages(&h, plan, 2026).unwrap()).unwrap(),
+            );
+            out.insert(format!("run_simulation:{key}"), serde_json::to_value(sim).unwrap());
+        }
         std::fs::write(path, serde_json::to_string(&json).unwrap()).unwrap();
     }
 
     #[test]
     fn demo_ranges_are_sane() {
         use engine::montecarlo::simulate;
-        let retiree = simulate(&household(Demo::Retiree), 2026).unwrap();
-        let early = simulate(&household(Demo::EarlyCareer), 2026).unwrap();
+        let retiree = simulate(&household(Demo::Retiree), None, 2026).unwrap();
+        let early = simulate(&household(Demo::EarlyCareer), None, 2026).unwrap();
         println!(
             "retiree: money lasts {:.1}%, lives off growth {:.1}%, median end {:.0}, 1-in-10 end {:.0}",
             retiree.money_lasts * 100.0,
@@ -84,10 +101,45 @@ mod tests {
         );
         println!("early career: money lasts {:.1}%", early.money_lasts * 100.0);
         assert_eq!(retiree.scenarios, 5_000);
-        // A $6.9M household spending $180k should almost always be fine, but not always.
+        // A $16.5M household spending $300k should almost always be fine, but not always.
         assert!(retiree.money_lasts > 0.85, "{}", retiree.money_lasts);
         assert!(retiree.lives_off_growth < retiree.money_lasts);
         assert!(early.money_lasts > 0.5);
+    }
+
+    /// The demo plans should tell the story the Compare view is built for.
+    /// `cargo test demo_plans -- --nocapture` prints the comparison.
+    #[test]
+    fn demo_plans_are_sane() {
+        use engine::projection::project;
+        let mut h = household(Demo::Retiree);
+        let plans = [None, Some(1), Some(2), Some(3)];
+        let run = |h: &engine::model::Household| plans.map(|p| project(h, p, 2026).unwrap().summary.estate);
+        let now = run(&h);
+        h.assumptions.exemption_cut_enabled = true;
+        let cut = run(&h);
+        for (i, p) in plans.iter().enumerate() {
+            let e = &now[i];
+            println!(
+                "plan {p:?}: estate tax {:>11.0} (cut: {:>11.0})  family total {:>12.0}  kids {:?}",
+                e.estate_tax_real,
+                cut[i].estate_tax_real,
+                e.family_total_real,
+                e.children.iter().map(|c| c.total_real.round()).collect::<Vec<_>>()
+            );
+        }
+        let [base, home, yearly, loan] = &now;
+        assert!(base.estate_tax_real > 0.0, "a $16.5M estate should owe some estate tax");
+        // Yearly exclusion gifts lower the estate tax and raise what the family gets in total.
+        assert!(yearly.estate_tax_real < base.estate_tax_real);
+        assert!(yearly.family_total_real > base.family_total_real);
+        // Helping one child makes the totals unequal.
+        assert!(home.children[0].total_real > home.children[1].total_real);
+        assert!(loan.children[1].total_real > loan.children[0].total_real);
+        // Cutting the exemption raises the estate tax in every plan.
+        for i in 0..plans.len() {
+            assert!(cut[i].estate_tax_real > now[i].estate_tax_real);
+        }
     }
 
     /// Guards against the engine drifting into nonsense on realistic households.
@@ -96,8 +148,8 @@ mod tests {
     fn demo_projections_are_sane() {
         use engine::projection::project;
 
-        let retiree = project(&household(Demo::Retiree), 2026).unwrap();
-        let early = project(&household(Demo::EarlyCareer), 2026).unwrap();
+        let retiree = project(&household(Demo::Retiree), None, 2026).unwrap();
+        let early = project(&household(Demo::EarlyCareer), None, 2026).unwrap();
         for (name, p) in [("retiree", &retiree), ("early career", &early)] {
             println!("{name}: {:#?}", p.summary);
             for y in p.years.iter().step_by(5) {
@@ -113,12 +165,12 @@ mod tests {
             }
         }
 
-        // A $6.9M household spending $180k with SS and rental income should not run out.
+        // A $16.5M household spending $300k with SS and rental income should not run out.
         assert_eq!(retiree.summary.runs_out_at_age, None);
         let y0 = &retiree.years[0];
         assert!(y0.taxes > 0.0 && y0.taxes < 100_000.0, "first-year taxes {}", y0.taxes);
-        // RMDs begin at 73 for someone born in 1959.
-        assert!(retiree.years.iter().find(|y| y.age == 73).unwrap().required_distributions > 0.0);
+        // RMDs begin at 75 for someone born in 1968.
+        assert!(retiree.years.iter().find(|y| y.age == 75).unwrap().required_distributions > 0.0);
 
         // The early-career saver accumulates while working.
         let at40 = early.years.iter().find(|y| y.age == 40).unwrap();

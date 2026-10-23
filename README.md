@@ -68,6 +68,31 @@ The same explanation is always visible in the app, under the headline ("How this
 
 When you zoom in on a scenario, a year is flagged as a **big stock drop** when stocks fall 15% or more, and as **high inflation** when prices rise 6% or more. Both are measured after scaling to your Assumptions.
 
+## Scenarios, gifts & estate
+The **Scenarios** page holds "what if" plans. Each one is your base plan plus a timeline of decisions (ages are the primary person's; money is in today's dollars):
+- help a child buy a home (a down-payment gift, optionally plus a family loan)
+- cash gifts (once or yearly, including "the yearly maximum to each child")
+- family loans
+- Roth conversions
+- a spending change
+- a different Social Security age
+
+Any plan can be viewed on the Forecast page, and two or three can be compared side by side.
+
+*Mirrored in the app's "How this works" panel (Estate & gifts) and the Forecast's "For the family" card. The figures come from `engine/tax_tables/2026.json`.*
+
+- **Gift tax:** up to **$19,000** per person per year (2026, indexed) is excluded. Larger gifts use part of the **$15M lifetime exemption** (2026; made permanent and indexed from 2027 by the 2025 One Big Beautiful Bill Act). No gift tax is due until the exemption is used up.
+- **Estate tax:** at the estate age (the plan's last year by default, or set in Assumptions), 40% × (net worth + gifts that used the exemption − exemption). Family loans still owed count as an asset. Federal only; Texas has no estate or inheritance tax.
+- **"What if the exemption is cut":** an Assumptions switch. From a year you pick, the exemption becomes an amount you set in today's dollars (suggested: $7M, roughly the pre-2018 rules today).
+- **Heirs' taxes:** inherited traditional IRA/401(k) money must be withdrawn within 10 years and is taxed as the kids' income. The app **assumes 24%** by default; change it in Assumptions. This assumption is shown on every "For the family" card. Other inherited assets get a stepped-up cost basis, so no capital-gains tax on past growth. Gifts keep the giver's basis.
+- **What the kids receive:**
+  - each child's lifetime gifts plus an equal share of the inheritance after estate tax and heirs' income tax
+  - gifts are **grown to the estate date at your own portfolio's yearly return**, so giving early is compared fairly with money kept (which also grows)
+  - the card shows both "given" and "worth by then"
+- **Family loans:** the rate defaults to the IRS minimum (applicable federal rate, Rev. Rul. 2026-21, Nov 2026): 4.67% for up to 3 years, 5.08% up to 9, 5.52% beyond. Payments come back to you (the interest is taxable income). Forgiven principal counts as a gift.
+- **Not modeled yet (Phase 4b):** a family LLC with valuation discounts, gifting investments directly, selling property, and state taxes other than a flat rate.
+- **Limits:** this is a planning estimate, not legal or tax advice. Confirm big gifting decisions with an estate attorney.
+
 ## Releasing (signed DMG to share)
 `npm run release` builds a universal app, signs it with your Developer ID, has Apple notarize it, and copies `Finance Simulator <version>.dmg` to your Desktop. Recipients can open it with a plain double-click.
 

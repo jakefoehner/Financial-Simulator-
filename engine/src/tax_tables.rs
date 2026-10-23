@@ -115,6 +115,33 @@ pub struct Rmd {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct EstateGift {
+    pub exemption: f64,
+    pub annual_exclusion: f64,
+    pub top_rate: f64,
+}
+
+/// Minimum family-loan interest rates (applicable federal rates).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Afr {
+    pub month: String,
+    pub short_term: f64,
+    pub mid_term: f64,
+    pub long_term: f64,
+}
+
+impl Afr {
+    /// The AFR for a loan of `years`: short-term up to 3, mid-term up to 9, long-term beyond.
+    pub fn for_years(&self, years: u32) -> f64 {
+        match years {
+            0..=3 => self.short_term,
+            4..=9 => self.mid_term,
+            _ => self.long_term,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct TaxTables {
     pub year: i32,
     pub ordinary_brackets: ByStatus<Vec<Bracket>>,
@@ -128,6 +155,8 @@ pub struct TaxTables {
     pub child_tax_credit: ChildTaxCredit,
     pub early_withdrawal: EarlyWithdrawal,
     pub irmaa: Irmaa,
+    pub estate_gift: EstateGift,
+    pub afr: Afr,
     pub rmd: Rmd,
 }
 
@@ -138,6 +167,21 @@ impl TaxTables {
         TABLES.get_or_init(|| {
             serde_json::from_str(include_str!("../tax_tables/2026.json")).expect("tax_tables/2026.json is valid")
         })
+    }
+
+    /// Yearly per-recipient gift exclusion at price index `idx`, rounded down to $1,000 like the IRS does.
+    pub fn annual_exclusion(&self, idx: f64) -> f64 {
+        ((self.estate_gift.annual_exclusion * idx.max(1.0)) / 1_000.0).floor() * 1_000.0
+    }
+
+    /// Lifetime estate/gift exemption in `year` at price index `idx`, honoring the
+    /// household's optional "exemption cut" (whose amount is in today's dollars).
+    pub fn estate_exemption(&self, year: i32, idx: f64, a: &crate::model::Assumptions) -> f64 {
+        if a.exemption_cut_enabled && year >= a.exemption_cut_year {
+            a.exemption_cut_amount * idx
+        } else {
+            self.estate_gift.exemption * idx
+        }
     }
 
     /// Age required minimum distributions start (SECURE 2.0).
@@ -171,6 +215,29 @@ mod tests {
         assert_eq!(*t.standard_deduction.get(FilingStatus::Single), 16_100.0);
         assert_eq!(t.ordinary_brackets.get(FilingStatus::MarriedJoint).len(), 7);
         assert!(t.ordinary_brackets.single.last().unwrap().up_to.is_none());
+    }
+
+    #[test]
+    fn estate_gift_figures_and_indexing() {
+        let t = TaxTables::current();
+        assert_eq!(t.estate_gift.exemption, 15_000_000.0);
+        assert_eq!(t.annual_exclusion(1.0), 19_000.0);
+        // 19,000 × 1.025 = 19,475 → rounds down to 19,000; × 1.06 = 20,140 → 20,000.
+        assert_eq!(t.annual_exclusion(1.025), 19_000.0);
+        assert_eq!(t.annual_exclusion(1.06), 20_000.0);
+        let mut a = crate::model::Assumptions::default();
+        assert_eq!(t.estate_exemption(2035, 1.0, &a), 15_000_000.0);
+        a.exemption_cut_enabled = true;
+        assert_eq!(t.estate_exemption(2029, 1.0, &a), 15_000_000.0);
+        assert_eq!(t.estate_exemption(2030, 1.1, &a), 7_000_000.0 * 1.1);
+    }
+
+    #[test]
+    fn afr_by_loan_length() {
+        let afr = &TaxTables::current().afr;
+        assert_eq!(afr.for_years(3), 0.0467);
+        assert_eq!(afr.for_years(9), 0.0508);
+        assert_eq!(afr.for_years(15), 0.0552);
     }
 
     #[test]

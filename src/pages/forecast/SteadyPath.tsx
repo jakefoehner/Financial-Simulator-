@@ -10,7 +10,8 @@ import {
   type DollarMode,
   type Projection,
 } from "../../lib/projection";
-import type { Household } from "../../lib/types";
+import type { Household, Id } from "../../lib/types";
+import FamilyCard from "./FamilyCard";
 import { BalancesCard, StatusTile, Tile, YearByYearCard } from "./shared";
 
 /** One steady path: the Assumptions every single year. */
@@ -18,11 +19,13 @@ export default function SteadyPath({
   household,
   startYear,
   mode,
+  plan,
   onError,
 }: {
   household: Household;
   startYear: number;
   mode: DollarMode;
+  plan: Id | null;
   onError: (e: string) => void;
 }) {
   const [projection, setProjection] = useState<Projection | null>(null);
@@ -30,13 +33,13 @@ export default function SteadyPath({
 
   // Re-run whenever the stored household changes (every edit returns a new object).
   useEffect(() => {
-    Promise.all([api.runProjection(startYear), api.compareClaimAges(startYear)])
+    Promise.all([api.runProjection(startYear, plan), api.compareClaimAges(startYear, plan)])
       .then(([p, c]) => {
         setProjection(p);
         setClaimAges(c);
       })
       .catch((e) => onError(String(e)));
-  }, [household, startYear, onError]);
+  }, [household, startYear, plan, onError]);
 
   const balances = useMemo(() => (projection ? balanceRows(projection, mode) : []), [projection, mode]);
   const flows = useMemo(() => (projection ? cashFlowRows(projection, mode) : []), [projection, mode]);
@@ -81,6 +84,8 @@ export default function SteadyPath({
       />
 
       {claimAges.length > 0 && <ClaimAgeCard outcomes={claimAges} />}
+
+      <FamilyCard estate={s.estate} />
 
       <YearByYearCard rows={flows} />
     </div>

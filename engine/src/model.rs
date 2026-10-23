@@ -176,6 +176,15 @@ pub struct Assumptions {
     pub simulations: u32,
     /// Use constant inflation in every scenario instead of replaying history's.
     pub steady_inflation: bool,
+    /// Income-tax rate the heirs are assumed to pay on inherited traditional IRA/401(k) money.
+    pub heir_income_tax_rate: f64,
+    /// "What if the estate exemption is cut": from `exemption_cut_year` on, the exemption
+    /// becomes `exemption_cut_amount` (in today's dollars).
+    pub exemption_cut_enabled: bool,
+    pub exemption_cut_amount: f64,
+    pub exemption_cut_year: i32,
+    /// Age of the primary person at which to estimate the estate. `None` = the plan's last year.
+    pub estate_age: Option<u32>,
 }
 
 impl Default for Assumptions {
@@ -189,6 +198,11 @@ impl Default for Assumptions {
             stock_dividend_yield: 0.015,
             simulations: 5_000,
             steady_inflation: false,
+            heir_income_tax_rate: 0.24,
+            exemption_cut_enabled: false,
+            exemption_cut_amount: 7_000_000.0,
+            exemption_cut_year: 2030,
+            estate_age: None,
         }
     }
 }
@@ -284,9 +298,79 @@ pub struct Household {
     pub one_time_expenses: Vec<OneTimeExpense>,
     #[serde(default)]
     pub assumptions: Assumptions,
+    /// "What if" plans built on top of everything above (the base plan).
+    #[serde(default)]
+    pub scenarios: Vec<Scenario>,
 }
 
 // ---------------------------------------------------------------------------
+// Scenarios: decisions layered on the base plan. Ages are the primary
+// person's; money is in today's dollars (inflated to the year it happens).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoanTerms {
+    pub amount: f64,
+    /// Yearly interest rate. Family loans should charge at least the IRS minimum (AFR).
+    pub rate: f64,
+    pub years: u32,
+    /// Interest only, with the principal due in the final year.
+    pub interest_only: bool,
+    /// Principal forgiven each year (a gift). Up to the yearly gift exclusion avoids using the lifetime exemption.
+    pub forgive_per_year: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+pub enum Event {
+    /// Help a child buy a home: a down-payment gift, optionally plus a family loan.
+    HomeHelp {
+        to: Id,
+        age: u32,
+        gift: f64,
+        loan: Option<LoanTerms>,
+    },
+    /// Cash gifts to one child (`to`) or each child (`to: None`), for `years` years from `from_age`.
+    /// `max_annual_exclusion` gives exactly the yearly gift-tax exclusion instead of `amount`.
+    CashGift {
+        to: Option<Id>,
+        amount: f64,
+        from_age: u32,
+        years: u32,
+        max_annual_exclusion: bool,
+    },
+    FamilyLoan {
+        to: Id,
+        age: u32,
+        loan: LoanTerms,
+    },
+    SocialSecurityAge {
+        age: u32,
+    },
+    /// From this age on, yearly living expenses become `annual_amount`.
+    SpendingChange {
+        from_age: u32,
+        annual_amount: f64,
+    },
+    /// Convert this much a year from traditional to Roth accounts, ages `from_age` through `to_age`.
+    RothConversion {
+        per_year: f64,
+        from_age: u32,
+        to_age: u32,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Scenario {
+    pub id: Option<Id>,
+    pub name: String,
+    #[serde(default)]
+    pub notes: String,
+    #[serde(default)]
+    pub events: Vec<Event>,
+}
 // Validation. Returns a user-facing message for the first problem found.
 // ---------------------------------------------------------------------------
 
@@ -393,7 +477,95 @@ impl Assumptions {
         in_range("Real estate growth", self.real_estate_growth, -0.1, 0.15)?;
         in_range("Inflation", self.inflation, -0.02, 0.15)?;
         in_range("Dividend yield", self.stock_dividend_yield, 0.0, self.stocks_return.max(0.0))?;
-        in_range("Scenarios", self.simulations, 100, 20_000)
+        in_range("Scenarios", self.simulations, 100, 20_000)?;
+        in_range("Heirs' income-tax rate", self.heir_income_tax_rate, 0.0, 0.6)?;
+        non_negative("Reduced exemption", self.exemption_cut_amount)?;
+        in_range("Year the exemption is cut", self.exemption_cut_year, 2026, 2100)?;
+        if let Some(age) = self.estate_age {
+            in_range("Estate age", age, 50, 120)?;
+        }
+        Ok(())
+    }
+}
+
+impl LoanTerms {
+    pub fn validate(&self) -> Validation {
+        non_negative("Loan amount", self.amount)?;
+        in_range("Loan rate", self.rate, 0.0, 0.2)?;
+        in_range("Loan length (years)", self.years, 1, 40)?;
+        non_negative("Yearly forgiveness", self.forgive_per_year)
+    }
+}
+
+impl Event {
+    /// Checks the event's own numbers and that any child it names is a child in `people`.
+    pub fn validate(&self, people: &[Person]) -> Validation {
+        let child = |id: Id| -> Validation {
+            if people.iter().any(|p| p.id == Some(id) && p.role == Role::Child) {
+                Ok(())
+            } else {
+                Err("Pick one of your children (add them on the People page).".into())
+            }
+        };
+        let age = |a: u32| in_range("Age", a, 18, 120);
+        match self {
+            Event::HomeHelp { to, age: a, gift, loan } => {
+                child(*to)?;
+                age(*a)?;
+                non_negative("Gift", *gift)?;
+                if let Some(l) = loan {
+                    l.validate()?;
+                }
+                Ok(())
+            }
+            Event::CashGift { to, amount, from_age, years, .. } => {
+                if let Some(id) = to {
+                    child(*id)?;
+                } else if !people.iter().any(|p| p.role == Role::Child) {
+                    return Err("Add your children on the People page first.".into());
+                }
+                non_negative("Gift", *amount)?;
+                age(*from_age)?;
+                in_range("Number of years", *years, 1, 60)
+            }
+            Event::FamilyLoan { to, age: a, loan } => {
+                child(*to)?;
+                age(*a)?;
+                loan.validate()
+            }
+            Event::SocialSecurityAge { age } => in_range("Social Security claim age", *age, 62, 70),
+            Event::SpendingChange { from_age, annual_amount } => {
+                age(*from_age)?;
+                non_negative("Yearly spending", *annual_amount)
+            }
+            Event::RothConversion { per_year, from_age, to_age } => {
+                non_negative("Yearly conversion", *per_year)?;
+                age(*from_age)?;
+                if to_age < from_age {
+                    return Err("The last conversion age must be on or after the first.".into());
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// The child this event is for, if any.
+    pub fn recipient(&self) -> Option<Id> {
+        match self {
+            Event::HomeHelp { to, .. } | Event::FamilyLoan { to, .. } => Some(*to),
+            Event::CashGift { to, .. } => *to,
+            _ => None,
+        }
+    }
+}
+
+impl Scenario {
+    pub fn validate(&self, people: &[Person]) -> Validation {
+        non_empty("Scenario name", &self.name)?;
+        for e in &self.events {
+            e.validate(people)?;
+        }
+        Ok(())
     }
 }
 
@@ -417,7 +589,14 @@ impl Household {
         for x in &self.one_time_expenses {
             x.validate().map_err(|e| format!("{}: {e}", x.name))?;
         }
+        for sc in &self.scenarios {
+            sc.validate(&self.people).map_err(|e| format!("{}: {e}", sc.name))?;
+        }
         Ok(())
+    }
+
+    pub fn scenario(&self, id: Id) -> Option<&Scenario> {
+        self.scenarios.iter().find(|s| s.id == Some(id))
     }
 }
 

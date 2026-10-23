@@ -1,8 +1,9 @@
 import { Info, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { formatPercent } from "../lib/format";
+import { formatPercent, formatUsd } from "../lib/format";
 import { DATA_SOURCES, methodSummary, scaledStockReturn, THRESHOLDS } from "../lib/simulation";
 import type { Assumptions } from "../lib/types";
+import { useTaxFacts } from "../lib/useTaxFacts";
 import { Button } from "./Card";
 
 /**
@@ -36,6 +37,8 @@ function MethodPanel({ assumptions: a, onClose }: { assumptions: Assumptions; on
   }, [onClose]);
 
   const pct = formatPercent;
+  const facts = useTaxFacts();
+  const usd = formatUsd;
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/25 pt-12 backdrop-blur-[2px]">
       <div
@@ -44,7 +47,7 @@ function MethodPanel({ assumptions: a, onClose }: { assumptions: Assumptions; on
         className="flex max-h-[calc(100vh-5rem)] w-[min(640px,92vw)] flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"
       >
         <div className="flex items-center justify-between border-b border-[var(--border)] px-6 py-4">
-          <h2 className="text-base font-semibold">How the range of outcomes works</h2>
+          <h2 className="text-base font-semibold">How the forecast works</h2>
           <button aria-label="Close" onClick={onClose} className="text-[var(--muted)] hover:text-[var(--text)]">
             <X size={18} />
           </button>
@@ -88,6 +91,26 @@ function MethodPanel({ assumptions: a, onClose }: { assumptions: Assumptions; on
             from {pct(THRESHOLDS.livesOffGrowth.caution, 0)}. When you zoom in on a scenario, a year is flagged as a big
             stock drop when stocks fall {pct(-THRESHOLDS.crash, 0)} or more, and as high inflation when prices rise{" "}
             {pct(THRESHOLDS.highInflation, 0)} or more (both after scaling to your Assumptions).
+          </Section>
+          <Section title="Estate & gifts">
+            {facts
+              ? `In ${facts.taxYear}, you can give each person up to ${usd(facts.annualExclusion)} a year without touching your lifetime exemption. Larger gifts use part of the ${usd(facts.exemption)} lifetime exemption (rising with inflation); no gift tax is due until it's used up. `
+              : ""}
+            At the end of the plan (or the age you choose in Assumptions), estate tax is 40% of everything above the
+            exemption that's left, counting gifts that used it.{" "}
+            {a.exemptionCutEnabled
+              ? `You've asked what happens if the exemption drops to ${usd(a.exemptionCutAmount)} (today's dollars) from ${a.exemptionCutYear}. `
+              : "You can test what happens if the exemption is cut, in Assumptions. "}
+            Your kids are assumed to pay {pct(a.heirIncomeTaxRate, 0)} income tax on traditional IRA/401(k) money they
+            inherit (it must be withdrawn within 10 years); change this in Assumptions. Other inherited assets get a
+            stepped-up cost basis, so no capital-gains tax on past growth, while gifts keep your original basis. To
+            compare giving early with giving later fairly, gifts are grown to the estate date at your own portfolio's
+            return, as if your kids invested them.
+            {facts
+              ? ` Family loans default to the IRS minimum rate for their length (${facts.afrMonth}: ${pct(facts.afrShortTerm)} up to 3 years, ${pct(facts.afrMidTerm)} up to 9, ${pct(facts.afrLongTerm)} beyond); forgiven principal counts as a gift.`
+              : ""}{" "}
+            Federal only (Texas has no estate tax). A planning estimate, not legal or tax advice; confirm big gifting
+            decisions with an estate attorney.
           </Section>
           <Section title="The data">
             Market returns: {DATA_SOURCES.returns}: {DATA_SOURCES.returnsSeries}, 1928–2025. Inflation:{" "}

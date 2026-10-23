@@ -87,7 +87,8 @@ v2 hook: a "tax regime" setting that multiplies or replaces brackets and exempti
 1. **Data entry:** all tables and CRUD screens, manual input, demo households.
 2. **Tax engine + fixed-return projection:** IRS worked-example tests. A single deterministic projection with charts and the cash-flow table.
 3. **Range of outcomes:** centered historical replay, odds tiles, fan chart, zoom-in on rough/typical/strong/worst scenarios with the market history each replayed, an always-visible method note, real vs nominal toggle.
-4. **Scenarios + estate/gifting** (mom's priority): the event timeline, gift/estate ledger, LLC/discount, intra-family loans, house gifts, side-by-side comparison.
+4. **Scenarios + estate/gifting** (mom's priority): decision timeline (home help, cash gifts, family loans, Roth conversions, spending, Social Security age), gift/estate ledger, exemption-cut what-if, "For the family" results, side-by-side comparison.
+   4b. Family LLC with valuation discount, gifting investments in kind, selling property.
 5. **Sharing & exports:** `.fsim` encrypt/import, CSV import/export, PDF report.
 6. **Connectivity:** SimpleFIN sync, ticker prices, per-ticker holdings, and a **single-stock risk model**. Each individual stock's yearly return = that year's market return × its sensitivity to the market + a company-specific swing, estimated from its price history. Its expected return is not assumed to beat the market; the model adds risk, not extra return. This matters for low-basis positions in the Phase 4 gift-vs-hold decision.
 7. **v2:** tax-rise regimes, optional DB encryption, more state-tax detail, stochastic lifespan, signed/notarized build.
@@ -101,6 +102,13 @@ v2 hook: a "tax regime" setting that multiplies or replaces brackets and exempti
   5. **Single-stock risk deferred to Phase 6** (needs ticker data).
   6. **Range of outcomes is the default Forecast view**, with zoom-in on representative scenarios and their replayed history. The steady path stays one tab away.
 - Success thresholds in the UI: "money lasts" is good at 90%+ and caution at 75–90%. "Lives off growth & income" (a stricter goal) is good at 75%+ and caution at 40–75%.
+- **2026-10-23: Scenarios and estate** (Jacob). Mom is 58, retired, with an estate slightly above the $15M exemption.
+  1. Priorities: down-payment help, cash gifts, family loans. Family LLC and in-kind gifts move to Phase 4b.
+  2. The "exemption cut" what-if is pulled forward from v2: from a chosen year, the exemption becomes a set amount in today's dollars (default $7M from 2030).
+  3. Heirs' income tax on inherited traditional IRA/401(k): 24% default, always disclosed on the "For the family" card, editable in Assumptions.
+  4. Gifts are grown to the estate date at the household's own yearly portfolio return before being added to what each child receives, so early gifts are compared fairly with money kept.
+  5. Scenario decisions are stored as JSON on the `scenario` row (one table instead of a separate events table).
+  6. The demo "Retired in Texas" became 58 with about $16.5M and three example plans.
 
 ## Verification
 - `cargo test -p engine`: tax tests against IRS worked examples and hand-computed cases (brackets, LTCG stacking, SS taxability, NIIT, RMD, gift/estate exemption). Golden-file projections for the demo households. Monte Carlo sanity checks: with zero volatility the result must equal the fixed-mode output, and a fixed seed must be reproducible.

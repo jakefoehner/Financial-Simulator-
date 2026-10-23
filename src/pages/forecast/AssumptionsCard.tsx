@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button, Card } from "../../components/Card";
-import { PercentField, SelectField, Toggle } from "../../components/fields";
+import { MoneyField, NumberField, PercentField, SelectField, Toggle } from "../../components/fields";
 import { api } from "../../lib/api";
 import { shallowEqual } from "../../lib/equal";
 import { formatPercent } from "../../lib/format";
@@ -74,6 +74,49 @@ export default function AssumptionsCard({ assumptions }: { assumptions: Assumpti
             />
           </div>
         </div>
+
+        <div className="grid gap-4 border-t border-[var(--border)] pt-4">
+          <p className="text-xs font-medium text-[var(--muted)]">Estate & inheritance</p>
+          <div className="grid grid-cols-3 items-start gap-4">
+            <PercentField
+              label="Kids' income-tax rate on inherited IRAs"
+              decimals={0}
+              hint="Inherited traditional IRA/401(k) money is taxed as your kids withdraw it (within 10 years). 24% is a middle-income bracket."
+              value={draft.heirIncomeTaxRate}
+              onChange={set("heirIncomeTaxRate")}
+            />
+            <NumberField
+              label="Estimate the estate at age"
+              hint="Blank = the last year of the plan."
+              optional
+              placeholder="End of plan"
+              value={draft.estateAge}
+              onChange={set("estateAge")}
+            />
+          </div>
+          <Toggle
+            label="What if the estate-tax exemption is cut?"
+            hint="Laws change. This lowers the $15M exemption from a year you choose, so you can see how much a cut would cost and whether giving earlier helps."
+            checked={draft.exemptionCutEnabled}
+            onChange={set("exemptionCutEnabled")}
+          />
+          {draft.exemptionCutEnabled && (
+            <div className="grid grid-cols-3 gap-4">
+              <MoneyField
+                label="Exemption becomes (today's dollars)"
+                hint="About $7M is roughly where the pre-2018 rules would be today."
+                value={draft.exemptionCutAmount}
+                onChange={(v) => set("exemptionCutAmount")(v ?? 0)}
+              />
+              <NumberField
+                label="Starting in"
+                value={draft.exemptionCutYear}
+                onChange={(v) => set("exemptionCutYear")(v ?? draft.exemptionCutYear)}
+              />
+            </div>
+          )}
+        </div>
+
         {error && <p className="text-sm text-[var(--critical)]">{error}</p>}
         <div className="flex justify-end gap-2">
           {!isDefault && <Button onClick={() => void save(DEFAULT_ASSUMPTIONS)}>Reset to defaults</Button>}

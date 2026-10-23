@@ -7,7 +7,9 @@
 //! - `upsert_*` validates, then inserts (no id) or updates (has id).
 //! - `delete_*` removes by id. Foreign keys handle dependents (see migration 0002).
 
-use engine::model::{Account, AccountType, Debt, DebtKind, Id, IncomeKind, IncomeStream, OneTimeExpense, Person, Role};
+use engine::model::{
+    Account, AccountType, Debt, DebtKind, Event, Id, IncomeKind, IncomeStream, OneTimeExpense, Person, Role, Scenario,
+};
 use rusqlite::{Connection, Row, params};
 
 use super::{Error, Result, enum_col};
@@ -95,9 +97,18 @@ pub fn upsert_person(conn: &Connection, p: &Person) -> Result<Id> {
     Ok(id)
 }
 
-/// Their accounts become joint; their personal income streams are removed.
+/// Their accounts become joint; their personal income streams are removed, and
+/// any scenario decisions naming them (gifts, loans, home help) are dropped.
 pub fn delete_person(conn: &Connection, id: Id) -> Result<()> {
-    delete_one(conn, "person", "person", id)
+    delete_one(conn, "person", "person", id)?;
+    for mut sc in list_scenarios(conn)? {
+        let before = sc.events.len();
+        sc.events.retain(|e| e.recipient() != Some(id));
+        if sc.events.len() != before {
+            write_scenario_events(conn, &sc)?;
+        }
+    }
+    Ok(())
 }
 
 // --- Account ---------------------------------------------------------------
@@ -346,6 +357,57 @@ pub fn delete_one_time_expense(conn: &Connection, id: Id) -> Result<()> {
     delete_one(conn, "expense", "one_time_expense", id)
 }
 
+// --- Scenario --------------------------------------------------------------
+
+fn scenario_from_row(r: &Row) -> rusqlite::Result<Scenario> {
+    let events: String = r.get(3)?;
+    Ok(Scenario {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        notes: r.get(2)?,
+        events: serde_json::from_str::<Vec<Event>>(&events)
+            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e)))?,
+    })
+}
+
+pub(super) fn list_scenarios(conn: &Connection) -> Result<Vec<Scenario>> {
+    list(conn, "SELECT id, name, notes, events FROM scenario ORDER BY id", scenario_from_row)
+}
+
+fn events_json(sc: &Scenario) -> Result<String> {
+    serde_json::to_string(&sc.events).map_err(|e| Error::Invalid(format!("Couldn't save the decisions: {e}")))
+}
+
+fn write_scenario_events(conn: &Connection, sc: &Scenario) -> Result<()> {
+    let id = sc.id.ok_or(Error::NotFound("scenario"))?;
+    update_one(conn, "scenario", "UPDATE scenario SET events = ?2 WHERE id = ?1", params![id, events_json(sc)?])
+}
+
+pub(super) fn insert_scenario(conn: &Connection, sc: &Scenario) -> Result<Id> {
+    conn.execute(
+        "INSERT INTO scenario (id, name, notes, events) VALUES (?1, ?2, ?3, ?4)",
+        params![sc.id, sc.name.trim(), sc.notes, events_json(sc)?],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Saves a whole scenario (name, notes, and its decisions) in one go.
+pub fn upsert_scenario(conn: &Connection, sc: &Scenario) -> Result<Id> {
+    sc.validate(&list_people(conn)?).map_err(Error::Invalid)?;
+    let Some(id) = sc.id else { return insert_scenario(conn, sc) };
+    update_one(
+        conn,
+        "scenario",
+        "UPDATE scenario SET name = ?2, notes = ?3, events = ?4 WHERE id = ?1",
+        params![id, sc.name.trim(), sc.notes, events_json(sc)?],
+    )?;
+    Ok(id)
+}
+
+pub fn delete_scenario(conn: &Connection, id: Id) -> Result<()> {
+    delete_one(conn, "scenario", "scenario", id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,6 +525,42 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let err = upsert_account(&conn, &account(Some(42))).unwrap_err();
         assert!(err.to_string().contains("no longer exists"), "{err}");
+    }
+
+    #[test]
+    fn scenarios_round_trip_and_follow_deleted_children() {
+        let conn = open_in_memory().unwrap();
+        let me = upsert_person(&conn, &person("Pat")).unwrap();
+        let sam = upsert_person(&conn, &Person { role: Role::Child, birth_year: 1995, ..person("Sam") }).unwrap();
+        let sc = Scenario {
+            id: None,
+            name: "Help Sam".into(),
+            notes: String::new(),
+            events: vec![
+                Event::HomeHelp { to: sam, age: 60, gift: 100_000.0, loan: None },
+                Event::SpendingChange { from_age: 65, annual_amount: 90_000.0 },
+            ],
+        };
+        let id = upsert_scenario(&conn, &sc).unwrap();
+        let loaded = list_scenarios(&conn).unwrap();
+        assert_eq!(loaded, vec![Scenario { id: Some(id), ..sc }]);
+
+        // Gifts to someone who isn't a child are rejected.
+        let bad = Scenario {
+            id: None,
+            name: "Bad".into(),
+            notes: String::new(),
+            events: vec![Event::HomeHelp { to: me, age: 60, gift: 1.0, loan: None }],
+        };
+        assert!(matches!(upsert_scenario(&conn, &bad), Err(Error::Invalid(_))));
+
+        // Deleting Sam drops the decision about Sam but keeps the rest.
+        delete_person(&conn, sam).unwrap();
+        let after = list_scenarios(&conn).unwrap();
+        assert_eq!(after[0].events, vec![Event::SpendingChange { from_age: 65, annual_amount: 90_000.0 }]);
+
+        delete_scenario(&conn, id).unwrap();
+        assert!(list_scenarios(&conn).unwrap().is_empty());
     }
 
     #[test]

@@ -12,15 +12,15 @@ type View = "range" | "steady";
 
 export default function Results() {
   const household = useApp((s) => s.household!);
-  const go = useApp((s) => s.go);
+  const { go, plan, setPlan } = useApp();
   const [view, setView] = useState<View>("range");
   const [mode, setMode] = useState<DollarMode>("today");
   const [error, setError] = useState<string | null>(null);
   const onError = useCallback((e: string) => setError(e), []);
   const startYear = currentYear();
 
-  // A new edit gets a fresh attempt.
-  useEffect(() => setError(null), [household]);
+  // A new edit or a different plan gets a fresh attempt.
+  useEffect(() => setError(null), [household, plan]);
 
   const needsPerson = household.people.every((p) => p.role !== "primary");
   if (needsPerson || error) {
@@ -36,17 +36,35 @@ export default function Results() {
     );
   }
 
+  const planName = plan == null ? "Base plan" : household.scenarios.find((s) => s.id === plan)?.name;
+
   return (
     <>
       <PageHeader
         title="Forecast"
         subtitle={
-          view === "range"
+          (plan == null ? "" : `Plan: ${planName}. `) +
+          (view === "range"
             ? "Thousands of possible futures built from real market history, with federal taxes paid along the way."
-            : "One steady path: your Assumptions every single year, with federal taxes paid along the way."
+            : "One steady path: your Assumptions every single year, with federal taxes paid along the way.")
         }
         actions={
           <>
+            {household.scenarios.length > 0 && (
+              <select
+                aria-label="Plan"
+                value={plan ?? 0}
+                onChange={(e) => setPlan(Number(e.target.value) || null)}
+                className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs"
+              >
+                <option value={0}>Base plan</option>
+                {household.scenarios.map((s) => (
+                  <option key={s.id} value={s.id!}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <Segmented<View>
               value={view}
               onChange={setView}
@@ -61,11 +79,13 @@ export default function Results() {
       />
       <div className="grid gap-5">
         {view === "range" ? (
-          <RangeView household={household} startYear={startYear} mode={mode} onError={onError} />
+          <RangeView household={household} startYear={startYear} mode={mode} plan={plan} onError={onError} />
         ) : (
-          <SteadyPath household={household} startYear={startYear} mode={mode} onError={onError} />
+          <SteadyPath household={household} startYear={startYear} mode={mode} plan={plan} onError={onError} />
         )}
-        <AssumptionsCard assumptions={household.assumptions} />
+        <div id="assumptions">
+          <AssumptionsCard assumptions={household.assumptions} />
+        </div>
       </div>
     </>
   );

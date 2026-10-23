@@ -7,6 +7,8 @@ export interface Balances {
   taxFree: number;
   realEstate: number;
   education: number;
+  /** Family loans still owed to you. */
+  loansReceivable: number;
 }
 
 export interface TaxResult {
@@ -45,11 +47,49 @@ export interface YearResult {
   medicareSurcharge: number;
   saved: number;
   shortfall: number;
+  /** Gifts this year including forgiven loan principal; `cashGifts` is just the cash given. */
+  gifts: number;
+  giftsByChild: { childId: number; amount: number }[];
+  giftTax: number;
+  cashGifts: number;
+  loansMade: number;
+  loanReceipts: number;
+  rothConversion: number;
+  lifetimeTaxableGifts: number;
+  portfolioReturn: number;
   tax: TaxResult;
   balances: Balances;
   debtBalance: number;
   netWorth: number;
   priceLevel: number;
+}
+
+export interface ChildEstate {
+  childId: number | null;
+  name: string;
+  giftsReal: number;
+  giftsGrownReal: number;
+  inheritanceReal: number;
+  totalReal: number;
+}
+
+/** Mirrors engine::estate::EstateResult. All amounts in today's dollars. */
+export interface EstateResult {
+  age: number;
+  year: number;
+  grossEstateReal: number;
+  lifetimeTaxableGiftsReal: number;
+  exemptionReal: number;
+  exemptionCutApplies: boolean;
+  estateTaxReal: number;
+  giftTaxPaidReal: number;
+  heirIncomeTaxRate: number;
+  heirsIncomeTaxReal: number;
+  netInheritanceReal: number;
+  lifetimeGiftsReal: number;
+  lifetimeGiftsGrownReal: number;
+  familyTotalReal: number;
+  children: ChildEstate[];
 }
 
 export interface Summary {
@@ -63,6 +103,7 @@ export interface Summary {
   lowestInvestableAge: number | null;
   endingNetWorthReal: number;
   endingInvestableReal: number;
+  estate: EstateResult;
 }
 
 export interface Projection {
@@ -120,7 +161,11 @@ export const BALANCE_SERIES = [
   { key: "taxable", label: "Brokerage", hint: "Taxed on dividends and when sold" },
   { key: "taxDeferred", label: "Pre-tax retirement", hint: "Traditional 401(k)/IRA: taxed when withdrawn" },
   { key: "taxFree", label: "Tax-free", hint: "Roth and HSA" },
-  { key: "realEstate", label: "Real estate", hint: "Homes and property (plus any 529s)" },
+  {
+    key: "realEstate",
+    label: "Real estate & other",
+    hint: "Homes, property, any 529s, and family loans owed to you",
+  },
 ] as const;
 
 export type BalanceKey = (typeof BALANCE_SERIES)[number]["key"];
@@ -148,7 +193,8 @@ export function balanceRows(p: Projection, mode: DollarMode): BalanceRow[] {
       taxDeferred: d(y.balances.taxDeferred),
       taxFree: d(y.balances.taxFree),
       // 529s are rare and small; fold them into the top band instead of adding a 6th color.
-      realEstate: d(y.balances.realEstate + y.balances.education),
+      // 529s and family loans are rare and small; fold them into the top band instead of adding colors.
+      realEstate: d(y.balances.realEstate + y.balances.education + y.balances.loansReceivable),
       debt: d(y.debtBalance),
       netWorth: d(y.netWorth),
     };
@@ -162,6 +208,8 @@ export interface CashFlowRow {
   socialSecurity: number;
   fromSavings: number;
   spending: number;
+  /** Cash gifts, money lent to family, and any gift tax. */
+  giving: number;
   taxes: number;
   saved: number;
   shortfall: number;
@@ -175,11 +223,13 @@ export function cashFlowRows(p: Projection, mode: DollarMode): CashFlowRow[] {
     return {
       year: y.year,
       age: y.age,
-      income: f(y.earnedIncome + y.otherIncome),
+      // Family loan repayments count as money coming in.
+      income: f(y.earnedIncome + y.otherIncome + y.loanReceipts),
       socialSecurity: f(y.socialSecurity),
       // RMDs are forced withdrawals, so they count as money from savings.
       fromSavings: f(y.withdrawals + y.requiredDistributions),
       spending: f(y.spending + y.oneTimeExpenses + y.debtPayments),
+      giving: f(y.cashGifts + y.loansMade + y.giftTax),
       taxes: f(y.taxes + y.medicareSurcharge),
       saved: f(y.saved + y.contributions),
       shortfall: f(y.shortfall),

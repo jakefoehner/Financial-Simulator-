@@ -4,6 +4,8 @@
 //! 1. Age everyone; work out income streams and Social Security.
 //! 2. Make contributions (while the owner is still earning) and take RMDs.
 //! 3. Pay spending, one-time expenses, and debt payments.
+//!    Scenario decisions happen here too: gifts, family loans (money out, then
+//!    repayments in), Roth conversions, spending changes.
 //! 4. Cover any shortfall by withdrawing cash → taxable → traditional → Roth/HSA,
 //!    re-solving taxes until they converge (withdrawals create tax, which
 //!    needs more withdrawals). Surpluses are saved to the brokerage account.
@@ -19,7 +21,8 @@ use std::ops::Add;
 
 use serde::Serialize;
 
-use crate::model::{Account, AccountType, Assumptions, Household, Id, IncomeKind, Person, Role};
+use crate::estate::{self, EstateResult};
+use crate::model::{Account, AccountType, Assumptions, Event, Household, Id, IncomeKind, LoanTerms, Person, Role};
 use crate::social_security::claiming_factor;
 use crate::tax::{self, TaxInput, TaxResult};
 use crate::tax_tables::TaxTables;
@@ -64,6 +67,8 @@ pub struct Balances {
     pub tax_free: f64,
     pub real_estate: f64,
     pub education: f64,
+    /// Family loans still owed to you (counted in net worth and the estate, not spendable).
+    pub loans_receivable: f64,
 }
 
 impl Balances {
@@ -73,7 +78,7 @@ impl Balances {
     }
 
     pub fn total(&self) -> f64 {
-        self.investable() + self.real_estate + self.education
+        self.investable() + self.real_estate + self.education + self.loans_receivable
     }
 }
 
@@ -101,6 +106,22 @@ pub struct YearResult {
     pub saved: f64,
     /// Spending that couldn't be paid because savings ran out.
     pub shortfall: f64,
+    /// Gifts this year (cash, down payments, forgiven loan principal), total and per child.
+    pub gifts: f64,
+    pub gifts_by_child: Vec<ChildAmount>,
+    /// Gift tax paid this year (only once the lifetime exemption is used up).
+    pub gift_tax: f64,
+    /// Cash given this year (gifts and down payments; excludes forgiven loan principal).
+    pub cash_gifts: f64,
+    /// Money lent to family this year.
+    pub loans_made: f64,
+    /// Loan payments received this year (interest + principal).
+    pub loan_receipts: f64,
+    pub roth_conversion: f64,
+    /// Running total of gifts above the yearly exclusions (uses up the lifetime exemption).
+    pub lifetime_taxable_gifts: f64,
+    /// Blended return of the spendable portfolio this year.
+    pub portfolio_return: f64,
     pub tax: TaxResult,
     // End of year
     pub balances: Balances,
@@ -108,6 +129,13 @@ pub struct YearResult {
     pub net_worth: f64,
     /// Price level at the end of the year (today = 1.0); divide by it for today's dollars.
     pub price_level: f64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChildAmount {
+    pub child_id: Id,
+    pub amount: f64,
 }
 
 impl YearResult {
@@ -138,6 +166,8 @@ pub struct Summary {
     pub lowest_investable_age: Option<u32>,
     pub ending_net_worth_real: f64,
     pub ending_investable_real: f64,
+    /// Estate and what the family receives, at the estate age.
+    pub estate: EstateResult,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -151,6 +181,7 @@ pub struct Projection {
 pub enum ProjectionError {
     NoPrimaryPerson,
     Invalid(String),
+    UnknownScenario,
 }
 
 impl std::fmt::Display for ProjectionError {
@@ -158,6 +189,7 @@ impl std::fmt::Display for ProjectionError {
         match self {
             ProjectionError::NoPrimaryPerson => f.write_str("Add yourself on the People page to see a forecast."),
             ProjectionError::Invalid(m) => f.write_str(m),
+            ProjectionError::UnknownScenario => f.write_str("That scenario no longer exists."),
         }
     }
 }
@@ -301,21 +333,101 @@ pub fn horizon_years(h: &Household, start_year: i32) -> Result<usize, Projection
     Ok((end_year - start_year + 1).max(0) as usize)
 }
 
+/// The decisions in `scenario` (`None` = the base plan, no decisions).
+pub fn events_for(h: &Household, scenario: Option<Id>) -> Result<Vec<Event>, ProjectionError> {
+    match scenario {
+        None => Ok(Vec::new()),
+        Some(id) => h.scenario(id).map(|s| s.events.clone()).ok_or(ProjectionError::UnknownScenario),
+    }
+}
+
 /// Runs the steady-path projection for `start_year` (normally the current calendar year).
-pub fn project(h: &Household, start_year: i32) -> Result<Projection, ProjectionError> {
+pub fn project(h: &Household, scenario: Option<Id>, start_year: i32) -> Result<Projection, ProjectionError> {
     let steady = MarketYear::steady(&h.assumptions);
-    project_market(h, start_year, TaxTables::current(), |_| steady)
+    project_market(h, &events_for(h, scenario)?, start_year, TaxTables::current(), |_| steady)
+}
+
+/// Decisions that simply change an input, applied before the yearly loop.
+fn apply_input_events(h: &Household, events: &[Event]) -> Household {
+    let mut h = h.clone();
+    for e in events {
+        if let Event::SocialSecurityAge { age } = e {
+            for p in h.people.iter_mut().filter(|p| p.role == Role::Primary) {
+                p.ss_claim_age = *age;
+                p.ss_already_claiming = false;
+            }
+        }
+    }
+    h
+}
+
+/// A family loan being repaid.
+#[derive(Debug, Clone)]
+struct Loan {
+    to: Id,
+    balance: f64,
+    rate: f64,
+    /// Fixed yearly payment for amortizing loans (nominal).
+    payment: f64,
+    years_left: u32,
+    interest_only: bool,
+    forgive: f64,
+}
+
+impl Loan {
+    fn new(to: Id, terms: &LoanTerms, price: f64) -> Loan {
+        let amount = terms.amount * price;
+        let n = terms.years.max(1) as i32;
+        let r = terms.rate;
+        let payment = if r == 0.0 { amount / n as f64 } else { amount * r / (1.0 - (1.0 + r).powi(-n)) };
+        Loan {
+            to,
+            balance: amount,
+            rate: r,
+            payment,
+            years_left: terms.years.max(1),
+            interest_only: terms.interest_only,
+            forgive: terms.forgive_per_year * price,
+        }
+    }
+
+    /// One year of repayment: returns (interest received, principal received, principal forgiven).
+    fn year(&mut self) -> (f64, f64, f64) {
+        if self.balance <= 0.0 || self.years_left == 0 {
+            return (0.0, 0.0, 0.0);
+        }
+        let interest = self.balance * self.rate;
+        let forgiven = self.forgive.min(self.balance);
+        self.balance -= forgiven;
+        let principal = if self.years_left == 1 {
+            self.balance
+        } else if self.interest_only {
+            0.0
+        } else {
+            (self.payment - interest).max(0.0).min(self.balance)
+        };
+        self.balance -= principal;
+        self.years_left -= 1;
+        (interest, principal, forgiven)
+    }
 }
 
 /// Runs the projection with `market(n)` supplying year `n`'s returns and inflation
-/// (n = 0 is `start_year`).
+/// (n = 0 is `start_year`) and `events` applying the scenario's decisions.
 pub fn project_market(
     h: &Household,
+    events: &[Event],
     start_year: i32,
     t: &TaxTables,
     market: impl Fn(usize) -> MarketYear,
 ) -> Result<Projection, ProjectionError> {
     h.validate().map_err(ProjectionError::Invalid)?;
+    for e in events {
+        e.validate(&h.people).map_err(ProjectionError::Invalid)?;
+    }
+    let prepared = apply_input_events(h, events);
+    let h = &prepared;
+    let children: Vec<Id> = h.people.iter().filter(|p| p.role == Role::Child).filter_map(|p| p.id).collect();
     let primary = h.people.iter().find(|p| p.role == Role::Primary).ok_or(ProjectionError::NoPrimaryPerson)?;
     let adults: Vec<&Person> = h.people.iter().filter(|p| matches!(p.role, Role::Primary | Role::Spouse)).collect();
     let person = |id: Option<Id>| id.and_then(|id| h.people.iter().find(|p| p.id == Some(id))).unwrap_or(primary);
@@ -356,6 +468,11 @@ pub fn project_market(
     let mut years = Vec::new();
     let mut magi_history: Vec<f64> = Vec::new();
     let mut price = 1.0; // start-of-year price level vs. today
+    let mut loans: Vec<Loan> = Vec::new();
+    let mut lifetime_taxable_gifts = 0.0;
+    let mut gift_tax_paid = 0.0;
+    let mut roth_target =
+        accts.iter().position(|a| matches!(a.account_type, AccountType::RothIra | AccountType::Roth401k));
 
     for year in start_year..=end_year {
         let n = year - start_year;
@@ -445,7 +562,18 @@ pub fn project_market(
         }
 
         // --- 3. Spending and debts ---
-        let spending = h.info.base_annual_spending * price;
+        let primary_age = (year - primary.birth_year).max(0) as u32;
+        let spending_today = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::SpendingChange { from_age, annual_amount } if *from_age <= primary_age => {
+                    Some((*from_age, *annual_amount))
+                }
+                _ => None,
+            })
+            .max_by_key(|(age, _)| *age)
+            .map_or(h.info.base_annual_spending, |(_, amount)| amount);
+        let spending = spending_today * price;
         let one_time: f64 =
             h.one_time_expenses.iter().filter(|x| x.year == year).map(|x| x.amount * price).fold(0.0, f64::add);
         let mut debt_payments = 0.0;
@@ -459,14 +587,124 @@ pub fn project_market(
             debt_payments += pay;
         }
 
+        // --- Scenario decisions: loans, gifts, Roth conversions ---
+        let mut gifts_by_child: Vec<ChildAmount> = Vec::new();
+        let mut give = |to: Id, amount: f64| {
+            if amount <= 0.0 {
+                return;
+            }
+            match gifts_by_child.iter_mut().find(|g| g.child_id == to) {
+                Some(g) => g.amount += amount,
+                None => gifts_by_child.push(ChildAmount { child_id: to, amount }),
+            }
+        };
+        let (mut loan_interest, mut loan_principal) = (0.0, 0.0);
+        for loan in loans.iter_mut() {
+            let (i, p, forgiven) = loan.year();
+            loan_interest += i;
+            loan_principal += p;
+            give(loan.to, forgiven);
+        }
+        loans.retain(|l| l.balance > 0.005 && l.years_left > 0);
+        interest += loan_interest;
+
+        let exclusion = t.annual_exclusion(index);
+        let (mut cash_gifts, mut loans_made) = (0.0, 0.0);
+        let mut roth_conversion_wanted = 0.0;
+        for e in events {
+            match e {
+                Event::HomeHelp { to, age, gift, loan } if *age == primary_age => {
+                    cash_gifts += gift * price;
+                    give(*to, gift * price);
+                    if let Some(terms) = loan {
+                        let l = Loan::new(*to, terms, price);
+                        loans_made += l.balance;
+                        loans.push(l);
+                    }
+                }
+                Event::FamilyLoan { to, age, loan } if *age == primary_age => {
+                    let l = Loan::new(*to, loan, price);
+                    loans_made += l.balance;
+                    loans.push(l);
+                }
+                Event::CashGift { to, amount, from_age, years, max_annual_exclusion }
+                    if primary_age >= *from_age && primary_age < from_age + years =>
+                {
+                    let each = if *max_annual_exclusion { exclusion } else { amount * price };
+                    let recipients: Vec<Id> = match to {
+                        Some(id) => vec![*id],
+                        None => children.clone(),
+                    };
+                    for id in recipients {
+                        cash_gifts += each;
+                        give(id, each);
+                    }
+                }
+                Event::RothConversion { per_year, from_age, to_age }
+                    if primary_age >= *from_age && primary_age <= *to_age =>
+                {
+                    roth_conversion_wanted += per_year * price;
+                }
+                _ => {}
+            }
+        }
+
+        // Roth conversion: move from traditional accounts into a Roth (taxed as income below).
+        let mut roth_conversion = 0.0;
+        if roth_conversion_wanted > 0.0 {
+            for a in accts.iter_mut().filter(|a| a.bucket == Bucket::TaxDeferred) {
+                let take = (roth_conversion_wanted - roth_conversion).min(a.balance.max(0.0));
+                a.balance -= take;
+                roth_conversion += take;
+            }
+            if roth_conversion > 0.0 {
+                let idx = match roth_target {
+                    Some(i) => i,
+                    None => {
+                        accts.push(Acct {
+                            bucket: Bucket::TaxFree,
+                            account_type: AccountType::RothIra,
+                            owner_birth_year: primary.birth_year,
+                            owner_id: primary.id,
+                            balance: 0.0,
+                            basis: 0.0,
+                            stocks: 0.6,
+                            bonds: 0.4,
+                            cash: 0.0,
+                            contribution: 0.0,
+                            employer_match: 0.0,
+                        });
+                        roth_target = Some(accts.len() - 1);
+                        accts.len() - 1
+                    }
+                };
+                accts[idx].balance += roth_conversion;
+            }
+        }
+
+        // Gift ledger: amounts above each child's yearly exclusion use up the lifetime exemption.
+        let gifts: f64 = gifts_by_child.iter().map(|g| g.amount).fold(0.0, f64::add);
+        lifetime_taxable_gifts += gifts_by_child.iter().map(|g| (g.amount - exclusion).max(0.0)).fold(0.0, f64::add);
+        let exemption = t.estate_exemption(year, index, &r);
+        let gift_tax =
+            (t.estate_gift.top_rate * (lifetime_taxable_gifts - exemption).max(0.0) - gift_tax_paid).max(0.0);
+        gift_tax_paid += gift_tax;
+
         let on_medicare = adults.iter().filter(|p| alive(p) && age_of(p) >= t.irmaa.medicare_age).count() as f64;
         let filers_65_plus = on_medicare as u32;
         let children_under_17 =
             h.people.iter().filter(|p| p.role == Role::Child && age_of(p) < t.child_tax_credit.under_age).count()
                 as u32;
 
-        let base_in = wages + self_employment + rental + pension_and_other + social_security + rmd_total;
-        let base_out = spending + one_time + debt_payments + contributions;
+        let base_in = wages
+            + self_employment
+            + rental
+            + pension_and_other
+            + social_security
+            + rmd_total
+            + loan_interest
+            + loan_principal;
+        let base_out = spending + one_time + debt_payments + contributions + cash_gifts + loans_made + gift_tax;
 
         let tax_for = |d: &Draw| {
             tax::compute(
@@ -483,7 +721,7 @@ pub fn project_market(
                     interest,
                     qualified_dividends,
                     long_term_gains: d.long_term_gains,
-                    traditional_distributions: rmd_total + d.traditional,
+                    traditional_distributions: rmd_total + d.traditional + roth_conversion,
                     early_distributions: d.early_traditional,
                     social_security_benefits: social_security,
                     filers_65_plus,
@@ -528,9 +766,18 @@ pub fn project_market(
         magi_history.push(tax_result.agi);
 
         // --- 5. Growth ---
+        // The spendable portfolio's blended return this year; gifts are grown at it in the
+        // estate so money given early is compared fairly with money kept.
+        let (mut spendable, mut grew) = (0.0, 0.0);
         for a in accts.iter_mut() {
-            a.balance *= 1.0 + a.total_return(&m);
+            let ret = a.total_return(&m);
+            if a.bucket.spendable() && a.balance > 0.0 {
+                spendable += a.balance;
+                grew += a.balance * ret;
+            }
+            a.balance *= 1.0 + ret;
         }
+        let portfolio_return = if spendable > 0.0 { grew / spendable } else { 0.6 * m.stocks + 0.4 * m.bonds };
         price *= 1.0 + m.inflation;
 
         let mut balances = Balances::default();
@@ -545,6 +792,7 @@ pub fn project_market(
             };
             *slot += a.balance;
         }
+        balances.loans_receivable = loans.iter().map(|l| l.balance).fold(0.0, f64::add);
         let debt_balance: f64 = debts.iter().map(|d| d.0).fold(0.0, f64::add);
 
         years.push(YearResult {
@@ -564,6 +812,15 @@ pub fn project_market(
             medicare_surcharge: irmaa,
             saved: if draw.total <= 0.0 { surplus } else { 0.0 },
             shortfall: draw.unmet,
+            gifts,
+            gifts_by_child,
+            gift_tax,
+            cash_gifts,
+            loans_made,
+            loan_receipts: loan_interest + loan_principal,
+            roth_conversion,
+            lifetime_taxable_gifts,
+            portfolio_return,
             tax: tax_result,
             net_worth: balances.total() - debt_balance,
             balances,
@@ -585,6 +842,7 @@ pub fn project_market(
         principal_dips_at_age: years.iter().find(|y| y.investable_real() < starting_investable * 0.999).map(|y| y.age),
         ending_net_worth_real: last.net_worth_real(),
         ending_investable_real: last.investable_real(),
+        estate: estate::estate_at(h, &years, start_year, t),
     };
     Ok(Projection { summary, years })
 }
@@ -605,8 +863,26 @@ pub struct ClaimAgeOutcome {
 
 /// Re-runs the projection with the primary person claiming at each possible age.
 /// Empty if they're already claiming or have no benefit entered.
-pub fn compare_claim_ages(h: &Household, start_year: i32) -> Result<Vec<ClaimAgeOutcome>, ProjectionError> {
+pub fn compare_claim_ages(
+    h: &Household,
+    scenario: Option<Id>,
+    start_year: i32,
+) -> Result<Vec<ClaimAgeOutcome>, ProjectionError> {
+    // The comparison varies the claim age itself, so drop any claim-age decision but keep the rest.
+    let mut events = events_for(h, scenario)?;
+    let chosen = events.iter().rev().find_map(|e| match e {
+        Event::SocialSecurityAge { age } => Some(*age),
+        _ => None,
+    });
+    events.retain(|e| !matches!(e, Event::SocialSecurityAge { .. }));
+    let base = apply_input_events(h, &[]);
+    let h = &base;
     let primary = h.people.iter().find(|p| p.role == Role::Primary).ok_or(ProjectionError::NoPrimaryPerson)?;
+    let primary = &Person {
+        ss_claim_age: chosen.unwrap_or(primary.ss_claim_age),
+        ss_already_claiming: primary.ss_already_claiming && chosen.is_none(),
+        ..primary.clone()
+    };
     if primary.ss_already_claiming || primary.ss_monthly_benefit.is_none() {
         return Ok(Vec::new());
     }
@@ -618,7 +894,8 @@ pub fn compare_claim_ages(h: &Household, start_year: i32) -> Result<Vec<ClaimAge
             for p in variant.people.iter_mut().filter(|p| p.role == Role::Primary) {
                 p.ss_claim_age = claim_age;
             }
-            let proj = project(&variant, start_year)?;
+            let steady = MarketYear::steady(&variant.assumptions);
+            let proj = project_market(&variant, &events, start_year, TaxTables::current(), |_| steady)?;
             Ok(ClaimAgeOutcome {
                 claim_age,
                 is_current_choice: claim_age == primary.ss_claim_age,
@@ -689,13 +966,13 @@ mod tests {
     #[test]
     fn requires_a_primary_person() {
         let h = Household::default();
-        assert_eq!(project(&h, 2026).unwrap_err(), ProjectionError::NoPrimaryPerson);
+        assert_eq!(project(&h, None, 2026).unwrap_err(), ProjectionError::NoPrimaryPerson);
     }
 
     #[test]
     fn runs_to_life_expectancy() {
         let h = household(vec![me(1960)], vec![account(AccountType::Savings, 10_000.0, None, 0.0)], 0.0);
-        let p = project(&h, 2026).unwrap();
+        let p = project(&h, None, 2026).unwrap();
         assert_eq!(p.years.first().unwrap().age, 66);
         assert_eq!(p.years.last().unwrap().age, 100);
         assert_eq!(p.years.len(), 35);
@@ -705,7 +982,7 @@ mod tests {
     fn untouched_roth_compounds_at_its_return() {
         // No spending, no income, a Roth at 100% stocks: grows exactly 7%/yr, no tax.
         let h = household(vec![me(1980)], vec![account(AccountType::RothIra, 100_000.0, None, 1.0)], 0.0);
-        let p = project(&h, 2026).unwrap();
+        let p = project(&h, None, 2026).unwrap();
         close(p.years[9].balances.tax_free, 100_000.0 * 1.07f64.powi(10), 0.01);
         assert!(p.years.iter().all(|y| y.taxes == 0.0));
     }
@@ -714,7 +991,7 @@ mod tests {
     fn withdrawals_cover_spending_and_their_own_taxes() {
         // 50-year-old (penalty applies) living off a traditional IRA.
         let h = household(vec![me(1976)], vec![account(AccountType::TradIra, 2_000_000.0, None, 0.6)], 60_000.0);
-        let y = &project(&h, 2026).unwrap().years[0];
+        let y = &project(&h, None, 2026).unwrap().years[0];
         // Withdrawal pays spending + income tax + 10% penalty exactly.
         close(y.withdrawals, y.spending + y.taxes, 0.05);
         assert!(y.tax.early_withdrawal_penalty > 0.0);
@@ -732,7 +1009,7 @@ mod tests {
             ],
             50_000.0,
         );
-        let y = &project(&h, 2026).unwrap().years[0];
+        let y = &project(&h, None, 2026).unwrap().years[0];
         // Cash (20k) is gone, then ~30k+ from taxable; IRA untouched (66, no RMD until 75).
         assert_eq!(y.required_distributions, 0.0);
         assert_eq!(y.tax.early_withdrawal_penalty, 0.0);
@@ -745,7 +1022,7 @@ mod tests {
     #[test]
     fn rmds_start_at_73_for_1959_births() {
         let h = household(vec![me(1959)], vec![account(AccountType::TradIra, 1_000_000.0, None, 0.6)], 0.0);
-        let p = project(&h, 2026).unwrap();
+        let p = project(&h, None, 2026).unwrap();
         let at = |age: u32| p.years.iter().find(|y| y.age == age).unwrap();
         assert_eq!(at(72).required_distributions, 0.0);
         let bal_start_73 = at(72).balances.tax_deferred;
@@ -760,7 +1037,7 @@ mod tests {
         p.ss_monthly_benefit = Some(2_000.0);
         p.ss_claim_age = 70;
         let h = household(vec![p], vec![account(AccountType::Savings, 100_000.0, None, 0.0)], 0.0);
-        let proj = project(&h, 2026).unwrap();
+        let proj = project(&h, None, 2026).unwrap();
         let at = |age: u32| proj.years.iter().find(|y| y.age == age).unwrap();
         assert_eq!(at(69).social_security, 0.0);
         // 2,000 × 12 × 1.24, inflated from 2026 to the start of the year they turn 70 (2035).
@@ -770,7 +1047,7 @@ mod tests {
     #[test]
     fn running_out_is_reported() {
         let h = household(vec![me(1960)], vec![account(AccountType::Checking, 100_000.0, None, 0.0)], 50_000.0);
-        let p = project(&h, 2026).unwrap();
+        let p = project(&h, None, 2026).unwrap();
         // 66: 100k - 50k = 50k → grows to 51k. 67: spending is 51,250 → 250 short.
         assert_eq!(p.summary.runs_out_at_age, Some(67));
         assert_eq!(p.summary.principal_dips_at_age, Some(66));
@@ -780,7 +1057,7 @@ mod tests {
     #[test]
     fn lowest_point_is_reported_only_when_savings_dip() {
         let h = household(vec![me(1980)], vec![account(AccountType::RothIra, 100_000.0, None, 1.0)], 0.0);
-        let s = project(&h, 2026).unwrap().summary;
+        let s = project(&h, None, 2026).unwrap().summary;
         assert_eq!((s.lowest_investable_age, s.lowest_investable_real), (None, 100_000.0));
     }
 
@@ -800,7 +1077,7 @@ mod tests {
             start_age: None,
             end_age: Some(32),
         });
-        let p = project(&h, 2026).unwrap();
+        let p = project(&h, None, 2026).unwrap();
         assert_eq!(p.years[0].contributions, 10_000.0);
         assert!(p.years[0].tax.agi < 80_000.0, "pre-tax 401(k) lowers AGI");
         let at32 = p.years.iter().find(|y| y.age == 32).unwrap();
@@ -821,7 +1098,7 @@ mod tests {
             account_id: None,
             notes: String::new(),
         });
-        let p = project(&h, 2026).unwrap();
+        let p = project(&h, None, 2026).unwrap();
         assert_eq!(p.years[0].debt_payments, 6_000.0);
         assert_eq!(p.years[1].debt_payments, 4_000.0);
         assert_eq!(p.years[2].debt_payments, 0.0);
@@ -832,7 +1109,7 @@ mod tests {
     fn one_time_expenses_are_inflated() {
         let mut h = household(vec![me(1980)], vec![account(AccountType::Checking, 500_000.0, None, 0.0)], 0.0);
         h.one_time_expenses.push(OneTimeExpense { id: None, name: "Roof".into(), year: 2028, amount: 30_000.0 });
-        let p = project(&h, 2026).unwrap();
+        let p = project(&h, None, 2026).unwrap();
         close(p.years[2].one_time_expenses, 30_000.0 * 1.025f64.powi(2), 0.01);
         assert_eq!(p.years[1].one_time_expenses, 0.0);
     }
@@ -843,7 +1120,7 @@ mod tests {
         p.ss_monthly_benefit = Some(3_000.0);
         p.ss_claim_age = 70;
         let h = household(vec![p], vec![account(AccountType::Taxable, 1_000_000.0, Some(800_000.0), 0.6)], 60_000.0);
-        let out = compare_claim_ages(&h, 2026).unwrap();
+        let out = compare_claim_ages(&h, None, 2026).unwrap();
         assert_eq!(out.iter().map(|o| o.claim_age).collect::<Vec<_>>(), vec![67, 68, 69, 70]);
         assert!(out.iter().find(|o| o.claim_age == 70).unwrap().is_current_choice);
         // Living to 100, waiting pays more in total.
@@ -864,7 +1141,133 @@ mod tests {
             start_age: None,
             end_age: None,
         });
-        let y = &project(&h, 2026).unwrap().years[0];
+        let y = &project(&h, None, 2026).unwrap().years[0];
         close(y.tax.deduction, 32_200.0, 0.01);
+    }
+
+    // --- Scenario decisions ---------------------------------------------------
+
+    fn kid(id: Id, name: &str) -> Person {
+        Person { id: Some(id), name: name.into(), birth_year: 1995, role: Role::Child, ..me(1995) }
+    }
+
+    /// 58-year-old (born 1968) with a big brokerage account and two kids.
+    fn family(events: Vec<Event>) -> Household {
+        let mut h = household(
+            vec![me(1968), kid(2, "Sam"), kid(3, "Jordan")],
+            vec![account(AccountType::Taxable, 5_000_000.0, Some(5_000_000.0), 0.6)],
+            0.0,
+        );
+        h.scenarios.push(crate::model::Scenario { id: Some(1), name: "Plan".into(), notes: String::new(), events });
+        h
+    }
+
+    fn run(events: Vec<Event>) -> Projection {
+        project(&family(events), Some(1), 2026).unwrap()
+    }
+
+    #[test]
+    fn base_plan_ignores_scenarios() {
+        let h = family(vec![Event::SpendingChange { from_age: 58, annual_amount: 99_000.0 }]);
+        assert_eq!(project(&h, None, 2026).unwrap().years[0].spending, 0.0);
+        assert_eq!(project(&h, Some(1), 2026).unwrap().years[0].spending, 99_000.0);
+        assert_eq!(project(&h, Some(7), 2026).unwrap_err(), ProjectionError::UnknownScenario);
+    }
+
+    #[test]
+    fn yearly_max_gifts_to_each_child_stay_within_the_exclusion() {
+        let p =
+            run(vec![Event::CashGift { to: None, amount: 0.0, from_age: 58, years: 3, max_annual_exclusion: true }]);
+        assert_eq!(p.years[0].gifts, 38_000.0);
+        assert_eq!(p.years[0].gifts_by_child.len(), 2);
+        assert_eq!(p.years[3].gifts, 0.0);
+        assert!(p.years.iter().all(|y| y.lifetime_taxable_gifts == 0.0));
+    }
+
+    #[test]
+    fn a_down_payment_gift_above_the_exclusion_uses_the_lifetime_exemption() {
+        let p = run(vec![Event::HomeHelp { to: 2, age: 58, gift: 100_000.0, loan: None }]);
+        assert_eq!(p.years[0].gifts, 100_000.0);
+        close(p.years[0].lifetime_taxable_gifts, 81_000.0, 0.01);
+        assert_eq!(p.years[0].gift_tax, 0.0);
+        // Sam got $100k during life; Jordan didn't.
+        let kids = &p.summary.estate.children;
+        assert!(kids[0].gifts_real > 99_000.0 && kids[1].gifts_real == 0.0);
+    }
+
+    #[test]
+    fn family_loans_go_out_then_come_back_with_taxable_interest() {
+        let terms = LoanTerms { amount: 100_000.0, rate: 0.05, years: 10, interest_only: false, forgive_per_year: 0.0 };
+        // Savings that earn nothing, so the loan interest is the only income.
+        let mut h = family(vec![Event::FamilyLoan { to: 3, age: 58, loan: terms }]);
+        h.accounts = vec![account(AccountType::Checking, 5_000_000.0, None, 0.0)];
+        h.assumptions.cash_return = 0.0;
+        let p = project(&h, Some(1), 2026).unwrap();
+        assert_eq!(p.years[0].loans_made, 100_000.0);
+        close(p.years[0].balances.loans_receivable, 100_000.0, 0.01);
+        // Ten equal payments of 100k × 5% / (1 − 1.05^−10) = $12,950.46, starting the next year.
+        let receipts: f64 = p.years[1..=10].iter().map(|y| y.loan_receipts).sum();
+        close(receipts, 129_504.57, 0.05);
+        // Year 1 interest on the full $100k at 5% is taxable income.
+        close(p.years[1].tax.agi, 5_000.0, 0.01);
+        close(p.years[10].balances.loans_receivable, 0.0, 0.01);
+        assert_eq!(p.years[11].loan_receipts, 0.0);
+    }
+
+    #[test]
+    fn forgiven_loan_principal_counts_as_gifts() {
+        let terms =
+            LoanTerms { amount: 50_000.0, rate: 0.0, years: 10, interest_only: true, forgive_per_year: 19_000.0 };
+        let p = run(vec![Event::FamilyLoan { to: 2, age: 58, loan: terms }]);
+        let gifts: Vec<f64> = p.years[1..=4].iter().map(|y| y.gifts).collect();
+        assert_eq!(gifts, [19_000.0, 19_000.0, 12_000.0, 0.0]);
+        assert!(p.years.iter().all(|y| y.lifetime_taxable_gifts == 0.0));
+    }
+
+    #[test]
+    fn roth_conversions_move_money_and_are_taxed() {
+        let mut h = household(
+            vec![me(1968)],
+            vec![
+                account(AccountType::TradIra, 1_000_000.0, None, 0.6),
+                account(AccountType::Checking, 500_000.0, None, 0.0),
+            ],
+            0.0,
+        );
+        h.scenarios.push(crate::model::Scenario {
+            id: Some(1),
+            name: "Convert".into(),
+            notes: String::new(),
+            events: vec![Event::RothConversion { per_year: 50_000.0, from_age: 60, to_age: 61 }],
+        });
+        let base = project(&h, None, 2026).unwrap();
+        let p = project(&h, Some(1), 2026).unwrap();
+        let at = |p: &Projection, age: u32| p.years.iter().find(|y| y.age == age).unwrap().clone();
+        assert_eq!(at(&p, 59).roth_conversion, 0.0);
+        close(at(&p, 60).roth_conversion, 50_000.0 * 1.025f64.powi(2), 0.01);
+        assert!(at(&p, 60).tax.agi > at(&base, 60).tax.agi + 40_000.0);
+        assert_eq!(at(&p, 60).tax.early_withdrawal_penalty, 0.0, "conversions aren't penalized");
+        assert!(at(&p, 61).balances.tax_free > 100_000.0);
+        assert_eq!(at(&p, 62).roth_conversion, 0.0);
+        // Smaller traditional balance → smaller RMDs at 75.
+        assert!(at(&p, 75).required_distributions < at(&base, 75).required_distributions);
+    }
+
+    #[test]
+    fn claim_age_decision_overrides_the_base_plan() {
+        let mut h = family(vec![Event::SocialSecurityAge { age: 62 }]);
+        h.people[0].ss_monthly_benefit = Some(3_000.0);
+        let p = project(&h, Some(1), 2026).unwrap();
+        assert!(p.years.iter().find(|y| y.age == 62).unwrap().social_security > 0.0);
+        let base = project(&h, None, 2026).unwrap();
+        assert_eq!(base.years.iter().find(|y| y.age == 62).unwrap().social_security, 0.0);
+        let cmp = compare_claim_ages(&h, Some(1), 2026).unwrap();
+        assert!(cmp.iter().find(|o| o.claim_age == 62).unwrap().is_current_choice);
+    }
+
+    #[test]
+    fn events_must_name_a_real_child() {
+        let h = family(vec![Event::HomeHelp { to: 99, age: 60, gift: 1.0, loan: None }]);
+        assert!(matches!(project(&h, Some(1), 2026), Err(ProjectionError::Invalid(_))));
     }
 }

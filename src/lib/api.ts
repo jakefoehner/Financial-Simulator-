@@ -13,6 +13,7 @@ import type {
   IncomeStream,
   OneTimeExpense,
   Person,
+  Scenario,
 } from "./types";
 
 export interface AppInfo {
@@ -24,16 +25,35 @@ export interface AppInfo {
 
 export type DemoName = "retiree" | "early_career";
 
+/** Current-law gift/estate figures and family-loan minimum rates (from engine/tax_tables). */
+export interface TaxFacts {
+  taxYear: number;
+  annualExclusion: number;
+  exemption: number;
+  afrMonth: string;
+  afrShortTerm: number;
+  afrMidTerm: number;
+  afrLongTerm: number;
+}
+
 export const api = {
   appInfo: () => invoke<AppInfo>("app_info"),
   getHousehold: () => invoke<Household>("get_household"),
   saveHouseholdInfo: (info: HouseholdInfo) => invoke<Household>("save_household_info", { info }),
   saveAssumptions: (assumptions: Assumptions) => invoke<Household>("save_assumptions", { assumptions }),
-  runProjection: (startYear: number) => invoke<Projection>("run_projection", { startYear }),
-  compareClaimAges: (startYear: number) => invoke<ClaimAgeOutcome[]>("compare_claim_ages", { startYear }),
-  runSimulation: (startYear: number) => invoke<Simulation>("run_simulation", { startYear }),
-  scenarioDetail: (startYear: number, pathIndex: number) =>
-    invoke<ScenarioDetail>("scenario_detail", { startYear, pathIndex }),
+  taxFacts: () => invoke<TaxFacts>("tax_facts"),
+  saveScenario: (scenario: Scenario) => invoke<Household>("save_scenario", { scenario }),
+  deleteScenario: (id: Id) => invoke<Household>("delete_scenario", { id }),
+
+  // `scenario` is a plan id; null = the base plan.
+  runProjection: (startYear: number, scenario: Id | null = null) =>
+    invoke<Projection>("run_projection", { startYear, scenario }),
+  compareClaimAges: (startYear: number, scenario: Id | null = null) =>
+    invoke<ClaimAgeOutcome[]>("compare_claim_ages", { startYear, scenario }),
+  runSimulation: (startYear: number, scenario: Id | null = null) =>
+    invoke<Simulation>("run_simulation", { startYear, scenario }),
+  scenarioDetail: (startYear: number, pathIndex: number, scenario: Id | null = null) =>
+    invoke<ScenarioDetail>("scenario_detail", { startYear, pathIndex, scenario }),
   loadDemo: (which: DemoName) => invoke<Household>("load_demo", { which }),
   clearHousehold: () => invoke<Household>("clear_household"),
 

@@ -4,17 +4,17 @@
     "state": "TX",
     "flatStateRate": 0,
     "filingStatus": "single",
-    "baseAnnualSpending": 180000
+    "baseAnnualSpending": 300000
   },
   "people": [
     {
       "id": 1,
       "name": "Pat",
-      "birthYear": 1959,
+      "birthYear": 1968,
       "role": "primary",
       "lifeExpectancy": 100,
-      "ssMonthlyBenefit": 3400,
-      "ssClaimAge": 70,
+      "ssMonthlyBenefit": 3600,
+      "ssClaimAge": 67,
       "ssAlreadyClaiming": false
     },
     {
@@ -44,8 +44,8 @@
       "name": "Taxable brokerage",
       "accountType": "taxable",
       "ownerId": 1,
-      "balance": 3200000,
-      "costBasis": 1500000,
+      "balance": 9400000,
+      "costBasis": 3800000,
       "stocksPct": 0.65,
       "bondsPct": 0.3,
       "cashPct": 0.05,
@@ -58,7 +58,7 @@
       "name": "Traditional IRA",
       "accountType": "trad_ira",
       "ownerId": 1,
-      "balance": 1450000,
+      "balance": 3200000,
       "costBasis": null,
       "stocksPct": 0.55,
       "bondsPct": 0.4,
@@ -72,7 +72,7 @@
       "name": "Roth IRA",
       "accountType": "roth_ira",
       "ownerId": 1,
-      "balance": 380000,
+      "balance": 650000,
       "costBasis": null,
       "stocksPct": 0.85,
       "bondsPct": 0.15,
@@ -86,7 +86,7 @@
       "name": "Checking",
       "accountType": "checking",
       "ownerId": 1,
-      "balance": 85000,
+      "balance": 150000,
       "costBasis": null,
       "stocksPct": 0,
       "bondsPct": 0,
@@ -100,7 +100,7 @@
       "name": "High-yield savings",
       "accountType": "savings",
       "ownerId": 1,
-      "balance": 250000,
+      "balance": 450000,
       "costBasis": null,
       "stocksPct": 0,
       "bondsPct": 0,
@@ -114,8 +114,8 @@
       "name": "Home",
       "accountType": "real_estate",
       "ownerId": 1,
-      "balance": 900000,
-      "costBasis": 420000,
+      "balance": 1600000,
+      "costBasis": 700000,
       "stocksPct": 0,
       "bondsPct": 0,
       "cashPct": 0,
@@ -128,8 +128,8 @@
       "name": "Rental property",
       "accountType": "real_estate",
       "ownerId": 1,
-      "balance": 650000,
-      "costBasis": 380000,
+      "balance": 1100000,
+      "costBasis": 600000,
       "stocksPct": 0,
       "bondsPct": 0,
       "cashPct": 0,
@@ -144,7 +144,7 @@
       "personId": 1,
       "kind": "rental",
       "name": "Rental income (after expenses)",
-      "annualAmount": 42000,
+      "annualAmount": 70000,
       "growthRate": 0.025,
       "startAge": null,
       "endAge": null
@@ -155,15 +155,45 @@
       "id": 1,
       "name": "Rental mortgage",
       "kind": "mortgage",
-      "balance": 210000,
+      "balance": 300000,
       "interestRate": 0.03125,
-      "monthlyPayment": 1650,
+      "monthlyPayment": 2300,
       "accountId": 7,
       "notes": ""
     }
   ],
   "oneTimeExpenses": [
-    { "id": 1, "name": "Roof replacement", "year": 2027, "amount": 35000 },
-    { "id": 2, "name": "New car", "year": 2028, "amount": 65000 }
+    { "id": 1, "name": "Roof replacement", "year": 2027, "amount": 45000 },
+    { "id": 2, "name": "New car", "year": 2028, "amount": 80000 }
+  ],
+  "scenarios": [
+    {
+      "id": 1,
+      "name": "Help Sam with a down payment",
+      "notes": "A one-time gift toward Sam's first home.",
+      "events": [{ "type": "home_help", "to": 2, "age": 59, "gift": 150000, "loan": null }]
+    },
+    {
+      "id": 2,
+      "name": "Yearly gifts to both kids",
+      "notes": "The yearly gift-tax exclusion to each child for 20 years.",
+      "events": [
+        { "type": "cash_gift", "to": null, "amount": 0, "fromAge": 59, "years": 20, "maxAnnualExclusion": true }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Family loan to Jordan",
+      "notes": "A down payment plus a 15-year loan at the IRS minimum rate, forgiving the yearly exclusion.",
+      "events": [
+        {
+          "type": "home_help",
+          "to": 3,
+          "age": 60,
+          "gift": 100000,
+          "loan": { "amount": 400000, "rate": 0.0552, "years": 15, "interestOnly": false, "forgivePerYear": 19000 }
+        }
+      ]
+    }
   ]
 }

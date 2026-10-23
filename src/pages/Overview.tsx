@@ -11,7 +11,7 @@ const DEMOS: { id: DemoName; title: string; body: string }[] = [
   {
     id: "retiree",
     title: "Retired in Texas",
-    body: "Single, 67, about $6.9M across brokerage, IRAs, a home, and a rental. Two adult children.",
+    body: "Single, 58, about $16.5M across brokerage, IRAs, a home, and a rental. Two adult children and three example gifting plans.",
   },
   {
     id: "early_career",

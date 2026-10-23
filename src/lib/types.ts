@@ -98,6 +98,40 @@ export interface Assumptions {
   simulations: number;
   /** Constant inflation instead of replaying history's. */
   steadyInflation: boolean;
+  /** Income-tax rate heirs are assumed to pay on inherited traditional IRA/401(k) money. */
+  heirIncomeTaxRate: number;
+  /** "What if the estate exemption is cut": from this year on it becomes this amount (today's dollars). */
+  exemptionCutEnabled: boolean;
+  exemptionCutAmount: number;
+  exemptionCutYear: number;
+  /** Age at which to estimate the estate; null = the plan's last year. */
+  estateAge: number | null;
+}
+
+export interface LoanTerms {
+  amount: number;
+  rate: number;
+  years: number;
+  interestOnly: boolean;
+  forgivePerYear: number;
+}
+
+/** Mirrors engine::model::Event (tagged by `type`). Ages are the primary person's; money is today's dollars. */
+export type Event =
+  | { type: "home_help"; to: Id; age: number; gift: number; loan: LoanTerms | null }
+  | { type: "cash_gift"; to: Id | null; amount: number; fromAge: number; years: number; maxAnnualExclusion: boolean }
+  | { type: "family_loan"; to: Id; age: number; loan: LoanTerms }
+  | { type: "social_security_age"; age: number }
+  | { type: "spending_change"; fromAge: number; annualAmount: number }
+  | { type: "roth_conversion"; perYear: number; fromAge: number; toAge: number };
+
+export type EventType = Event["type"];
+
+export interface Scenario {
+  id: Id | null;
+  name: string;
+  notes: string;
+  events: Event[];
 }
 
 /** Mirrors `Assumptions::default()`. */
@@ -110,6 +144,11 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
   stockDividendYield: 0.015,
   simulations: 5000,
   steadyInflation: false,
+  heirIncomeTaxRate: 0.24,
+  exemptionCutEnabled: false,
+  exemptionCutAmount: 7_000_000,
+  exemptionCutYear: 2030,
+  estateAge: null,
 };
 
 export interface Household {
@@ -120,6 +159,7 @@ export interface Household {
   debts: Debt[];
   oneTimeExpenses: OneTimeExpense[];
   assumptions: Assumptions;
+  scenarios: Scenario[];
 }
 
 // --- Labels -----------------------------------------------------------------

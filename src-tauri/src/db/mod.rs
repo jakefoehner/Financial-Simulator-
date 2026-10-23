@@ -14,8 +14,8 @@ use rusqlite::{Connection, OptionalExtension, Row};
 
 pub use household::{clear_household, load_household, replace_household, save_assumptions, save_info};
 pub use records::{
-    delete_account, delete_debt, delete_income, delete_one_time_expense, delete_person, upsert_account, upsert_debt,
-    upsert_income, upsert_one_time_expense, upsert_person,
+    delete_account, delete_debt, delete_income, delete_one_time_expense, delete_person, delete_scenario,
+    upsert_account, upsert_debt, upsert_income, upsert_one_time_expense, upsert_person, upsert_scenario,
 };
 
 /// Ordered migrations. Never edit a shipped entry; append a new one.
@@ -24,6 +24,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0002_household_data.sql"),
     include_str!("../../migrations/0003_assumptions.sql"),
     include_str!("../../migrations/0004_simulation.sql"),
+    include_str!("../../migrations/0005_scenarios.sql"),
 ];
 
 #[derive(Debug)]

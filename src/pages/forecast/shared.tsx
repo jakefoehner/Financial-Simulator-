@@ -134,26 +134,28 @@ export function BalancesCard({ rows, mode, footnote }: { rows: BalanceRow[]; mod
   );
 }
 
-const FLOW_HEADERS = [
-  "Year",
-  "Age",
-  "Income",
-  "Social Security",
-  "From savings",
-  "Spending & debts",
-  "Taxes",
-  "Saved",
-  "Net worth",
-];
-
 export function YearByYearCard({ rows, extra }: { rows: CashFlowRow[]; extra?: (year: number) => ReactNode }) {
+  // Only plans that give or lend money get the extra column.
+  const showGiving = rows.some((r) => r.giving > 0.5);
+  const headers = [
+    "Year",
+    "Age",
+    "Income",
+    "Social Security",
+    "From savings",
+    "Spending & debts",
+    ...(showGiving ? ["Gifts & loans"] : []),
+    "Taxes",
+    "Saved",
+    "Net worth",
+  ];
   return (
     <Card title="Year by year">
       <div className="max-h-[28rem] overflow-y-auto rounded-md border border-[var(--border)]">
         <table className="w-full text-right text-xs tabular-nums">
           <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
             <tr>
-              {FLOW_HEADERS.map((h, i) => (
+              {headers.map((h, i) => (
                 <th key={h} className={`px-3 py-2 font-medium ${i < 2 ? "text-left" : ""}`}>
                   {h}
                 </th>
@@ -170,6 +172,7 @@ export function YearByYearCard({ rows, extra }: { rows: CashFlowRow[]; extra?: (
                 <td className="px-3 py-1.5">{money(r.socialSecurity)}</td>
                 <td className="px-3 py-1.5">{money(r.fromSavings)}</td>
                 <td className="px-3 py-1.5">{money(r.spending)}</td>
+                {showGiving && <td className="px-3 py-1.5">{money(r.giving)}</td>}
                 <td className="px-3 py-1.5">{money(r.taxes)}</td>
                 <td className="px-3 py-1.5">{money(r.saved)}</td>
                 <td className="px-3 py-1.5 font-medium">
@@ -187,7 +190,7 @@ export function YearByYearCard({ rows, extra }: { rows: CashFlowRow[]; extra?: (
       </div>
       <p className="mt-2 text-xs text-[var(--muted)]">
         "From savings" includes required minimum distributions from retirement accounts. "Saved" includes retirement
-        contributions and anything left over.
+        contributions and anything left over.{showGiving && ' "Income" includes family loan repayments.'}
       </p>
     </Card>
   );

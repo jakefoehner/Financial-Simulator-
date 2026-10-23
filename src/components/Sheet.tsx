@@ -13,6 +13,7 @@ export function Sheet({
   onCancel,
   onDelete,
   deleteLabel = "Delete",
+  saveLabel = "Save",
   deleteWarning,
   children,
 }: {
@@ -24,6 +25,7 @@ export function Sheet({
   /** Present only when editing an existing record. */
   onDelete?: () => void;
   deleteLabel?: string;
+  saveLabel?: string;
   deleteWarning?: string;
   children: ReactNode;
 }) {
@@ -76,7 +78,7 @@ export function Sheet({
           <div className="ml-auto flex gap-2">
             <Button onClick={onCancel}>Cancel</Button>
             <Button variant="primary" type="submit" disabled={saving}>
-              {saving ? "Saving…" : "Save"}
+              {saving ? "Saving…" : saveLabel}
             </Button>
           </div>
         </div>

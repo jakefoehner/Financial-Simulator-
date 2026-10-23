@@ -34,6 +34,22 @@ export interface Simulation {
   netWorthReal: Bands;
   netWorthNominal: Bands;
   representatives: Representative[];
+  estate: EstateRange;
+}
+
+/** 10th / 50th / 90th percentile of one number across scenarios. */
+export interface Spread {
+  p10: number;
+  p50: number;
+  p90: number;
+}
+
+/** Mirrors engine::montecarlo::EstateRange. Today's dollars. */
+export interface EstateRange {
+  age: number;
+  estateTaxReal: Spread;
+  familyTotalReal: Spread;
+  children: { childId: number | null; name: string; totalReal: Spread }[];
 }
 
 export interface MarketYear {

@@ -14,6 +14,7 @@ A wealthy, retired single mother in Texas, weighing estate/gift decisions (gifti
 - Tax law values belong in data files (`engine/tax_tables/<year>.json`), never hard-coded. Note the source in the file when updating.
 - Preview a demo forecast outside Tauri: `FSIM_DUMP=out.json cargo test dump_demo -- --ignored` writes household + projection JSON.
 - Federal taxes only (plus an optional flat state rate). Planning-grade accuracy.
+- Scenarios = base plan + `Event` decisions (`engine/src/model.rs`), applied in `projection.rs`. The estate math is in `estate.rs`. Every projection/simulation command takes an optional scenario id (`None` = base plan). Estate figures shown to users must keep the heirs'-tax assumption and the not-legal-advice note visible (`FamilyCard.tsx`, MethodNote, README "Scenarios, gifts & estate").
 - Range of outcomes = **centered historical replay only** (`engine/src/history.rs`, `montecarlo.rs`); no parametric returns. If the method changes, update all three explanations together: `src/components/MethodNote.tsx`, README "How the forecast works", and the `docs/SPEC.md` Decisions log.
 - Never commit real personal data (`*.sqlite`, `*.fsim` are gitignored).
 

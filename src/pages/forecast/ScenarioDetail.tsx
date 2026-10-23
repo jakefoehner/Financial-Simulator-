@@ -12,7 +12,7 @@ import {
   type Representative,
   type ScenarioDetail,
 } from "../../lib/simulation";
-import type { Household } from "../../lib/types";
+import type { Household, Id } from "../../lib/types";
 import { BalancesCard, YearByYearCard } from "./shared";
 
 const CRASH = THRESHOLDS.crash;
@@ -23,6 +23,7 @@ export default function ScenarioDetailView({
   startYear,
   representative: rep,
   mode,
+  plan,
   onClose,
   onError,
 }: {
@@ -30,6 +31,7 @@ export default function ScenarioDetailView({
   startYear: number;
   representative: Representative;
   mode: DollarMode;
+  plan: Id | null;
   onClose: () => void;
   onError: (e: string) => void;
 }) {
@@ -37,10 +39,10 @@ export default function ScenarioDetailView({
 
   useEffect(() => {
     api
-      .scenarioDetail(startYear, rep.pathIndex)
+      .scenarioDetail(startYear, rep.pathIndex, plan)
       .then(setDetail)
       .catch((e) => onError(String(e)));
-  }, [household, startYear, rep.pathIndex, onError]);
+  }, [household, startYear, rep.pathIndex, plan, onError]);
 
   const balances = useMemo(() => (detail ? balanceRows(detail.projection, mode) : []), [detail, mode]);
   const flows = useMemo(() => (detail ? cashFlowRows(detail.projection, mode) : []), [detail, mode]);

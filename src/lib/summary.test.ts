@@ -15,18 +15,19 @@ const empty: Household = {
   debts: [],
   oneTimeExpenses: [],
   assumptions: DEFAULT_ASSUMPTIONS,
+  scenarios: [],
 };
 
 describe("summarize", () => {
   it("totals the retiree demo", () => {
     const s = summarize(retiree, 2026);
-    expect(s.totalAssets).toBe(6_915_000);
-    expect(s.realEstate).toBe(1_550_000);
-    expect(s.investable).toBe(5_365_000);
-    expect(s.totalDebts).toBe(210_000);
-    expect(s.netWorth).toBe(6_705_000);
-    expect(s.currentAnnualIncome).toBe(42_000); // rental only; Social Security not claimed yet
-    expect(s.annualDebtPayments).toBe(19_800);
+    expect(s.totalAssets).toBe(16_550_000);
+    expect(s.realEstate).toBe(2_700_000);
+    expect(s.investable).toBe(13_850_000);
+    expect(s.totalDebts).toBe(300_000);
+    expect(s.netWorth).toBe(16_250_000);
+    expect(s.currentAnnualIncome).toBe(70_000); // rental only; Social Security not claimed yet
+    expect(s.annualDebtPayments).toBe(27_600);
   });
 
   it("drops income streams that have ended", () => {
@@ -40,7 +41,7 @@ describe("summarize", () => {
       ...retiree,
       people: retiree.people.map((p) => (p.role === "primary" ? { ...p, ssAlreadyClaiming: true } : p)),
     };
-    expect(summarize(claiming, 2026).currentAnnualIncome).toBe(42_000 + 3_400 * 12);
+    expect(summarize(claiming, 2026).currentAnnualIncome).toBe(70_000 + 3_600 * 12);
   });
 });
 
