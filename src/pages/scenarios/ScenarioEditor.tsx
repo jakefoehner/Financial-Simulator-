@@ -5,6 +5,7 @@ import { TextField } from "../../components/fields";
 import { api } from "../../lib/api";
 import {
   CHOICE_GROUPS,
+  CHOICE_KEYWORDS,
   EVENT_CHOICES,
   eventAge,
   eventSummary,
@@ -16,6 +17,8 @@ import { formatPercent, formatUsdCompact } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import { ageOf, giftableInKind, type Event, type EventType, type Household, type Scenario } from "../../lib/types";
 import { useTaxFacts } from "../../lib/useTaxFacts";
+import { matches } from "../../lib/search";
+import { Highlight, SearchBox } from "../../components/SearchBox";
 import { EventSheet } from "./EventSheet";
 
 /** Edit one plan: its name, notes, and timeline of decisions. Saved all at once. */
@@ -92,6 +95,13 @@ export default function ScenarioEditor({
   };
 
   const needsKids = kids.length === 0;
+  const query = useApp((s) => s.searches.decisions ?? "");
+  const disabledChoice = (type: (typeof EVENT_CHOICES)[number]["type"]) =>
+    (needsKids && NEEDS_KIDS.includes(type)) || (giftAccounts.length === 0 && NEEDS_GIFT_ACCOUNT.includes(type));
+  const groupTitle = (id: string) => CHOICE_GROUPS.find((g) => g.id === id)?.title ?? "";
+  const found = EVENT_CHOICES.filter((c) =>
+    matches(query, [c.title, c.blurb, groupTitle(c.group), CHOICE_KEYWORDS[c.type]]),
+  );
 
   return (
     <div className="grid gap-5">
@@ -128,26 +138,42 @@ export default function ScenarioEditor({
         )}
         {choosing && (
           <div className="mb-4 grid gap-4">
-            {CHOICE_GROUPS.map((g) => (
+            <SearchBox
+              scope="decisions"
+              placeholder="Search decisions: “house”, “college”, “donate”, “trust”, “loan”…"
+              autoFocus
+              onEnter={() => {
+                const first = found.find((c) => !disabledChoice(c.type));
+                if (first) start(first.type);
+              }}
+            />
+            {found.length === 0 && (
+              <p className="text-sm text-[var(--muted)]">No decisions match “{query}”. Try a simpler word.</p>
+            )}
+            {CHOICE_GROUPS.filter((g) => found.some((c) => c.group === g.id)).map((g) => (
               <section key={g.id}>
                 <h3 className="mb-2 text-xs font-semibold tracking-wide text-[var(--muted)] uppercase">{g.title}</h3>
                 <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-                  {EVENT_CHOICES.filter((c) => c.group === g.id).map((c) => {
-                    const disabled =
-                      (needsKids && NEEDS_KIDS.includes(c.type)) ||
-                      (giftAccounts.length === 0 && NEEDS_GIFT_ACCOUNT.includes(c.type));
-                    return (
-                      <button
-                        key={c.type}
-                        onClick={() => start(c.type)}
-                        disabled={disabled}
-                        className="rounded-lg border border-[var(--border)] p-3 text-left transition hover:border-accent disabled:opacity-40"
-                      >
-                        <p className="text-sm font-medium">{c.title}</p>
-                        <p className="mt-0.5 text-xs text-[var(--muted)]">{c.blurb}</p>
-                      </button>
-                    );
-                  })}
+                  {found
+                    .filter((c) => c.group === g.id)
+                    .map((c) => {
+                      const disabled = disabledChoice(c.type);
+                      return (
+                        <button
+                          key={c.type}
+                          onClick={() => start(c.type)}
+                          disabled={disabled}
+                          className="rounded-lg border border-[var(--border)] p-3 text-left transition hover:border-accent disabled:opacity-40"
+                        >
+                          <p className="text-sm font-medium">
+                            <Highlight text={c.title} query={query} />
+                          </p>
+                          <p className="mt-0.5 text-xs text-[var(--muted)]">
+                            <Highlight text={c.blurb} query={query} />
+                          </p>
+                        </button>
+                      );
+                    })}
                 </div>
               </section>
             ))}

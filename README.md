@@ -137,6 +137,19 @@ Accounts can be **Private real estate fund**, **Private credit fund**, **Startup
 - These are planning assumptions (`engine/src/montecarlo.rs`, mirrored in `src/lib/simulation.ts`).
 - **Limits:** this is a planning estimate, not legal or tax advice. Confirm big gifting decisions with an estate attorney.
 
+## Searching
+The Scenarios page, the "Add a decision" picker and the Giving guide each have a search box. ⌘F focuses it, Esc clears it, and the text is kept while the app is open.
+- **How matching works:**
+  - every word must match
+  - case and accents don't matter
+  - dollar amounts match in any form ("$2M" = "2,000,000")
+  - everyday words find the app's terms (house → home, college → 529/tuition, trust → GRAT, donate → charity); the list is in `src/lib/search.ts`
+- **Scenarios:** filters the plans by name, notes and every decision line (e.g. "Sam" finds every plan that touches Sam). It also has:
+  - sort by newest, A–Z, or most for the kids
+  - a compact list view
+  - a sticky "Comparing…" bar
+- **Giving guide:** filter chips (For the kids, Charity, Advanced, Taxes), collapsed cards with "More", and an "On this page" list.
+
 ## Family households
 Each child listed on your People page can have a **full household of their own**: people (their spouse or kids), accounts, income, debts, spending, plans, and a forecast, the same as yours. **Build Sam's household** on the People page creates it. Switch between households at the top of the sidebar.
 

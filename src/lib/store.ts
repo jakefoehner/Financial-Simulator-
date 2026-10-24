@@ -38,6 +38,9 @@ interface AppStore {
   mutate: (op: () => Promise<Household>) => Promise<void>;
   /** View another household (`null` = yours). */
   switchHousehold: (id: number | null) => Promise<void>;
+  /** Search text per list ("scenarios", "decisions", "guide"), kept while the app is open. */
+  searches: Record<string, string>;
+  setSearch: (scope: string, text: string) => void;
 }
 
 /** Falls back to the base plan if the selected scenario was deleted. */
@@ -57,6 +60,8 @@ export const useApp = create<AppStore>((set, get) => ({
   plan: null,
   loadError: null,
   backupRequest: null,
+  searches: {},
+  setSearch: (scope, text) => set({ searches: { ...get().searches, [scope]: text } }),
   requestBackup: (backupRequest) => set({ backupRequest }),
   go: (section) => set({ section }),
   setPlan: (plan) => set({ plan }),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import retireeJson from "../../fixtures/demo-retiree.json";
 import type { TaxFacts } from "./api";
+import { matches } from "./search";
 import { strategies } from "./strategies";
 import type { Household } from "./types";
 
@@ -29,6 +30,15 @@ describe("strategies", () => {
       expect(plan, s.id).not.toBeNull();
       expect(plan!.events.length, s.id).toBeGreaterThan(0);
     }
+  });
+
+  it("every strategy is tagged and can be found by its title", () => {
+    for (const st of strategies(facts)) {
+      expect(st.tags.length, st.id).toBeGreaterThan(0);
+      expect(matches(st.title, [st.title, st.summary]), st.id).toBe(true);
+    }
+    const charity = strategies(facts).filter((st) => matches("donate", [st.title, st.summary, st.how]));
+    expect(charity.map((st) => st.id)).toContain("charity");
   });
 
   it("has every strategy in the app now", () => {

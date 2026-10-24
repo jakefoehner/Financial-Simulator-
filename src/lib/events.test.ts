@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TaxFacts } from "./api";
-import { afrFor, eventAge, eventSummary, EVENT_CHOICES, newEvent } from "./events";
+import { afrFor, CHOICE_KEYWORDS, eventAge, eventSummary, EVENT_CHOICES, newEvent } from "./events";
+import { matches } from "./search";
 import { formatPercent, formatUsdCompact } from "./format";
 import type { Event } from "./types";
 
@@ -33,6 +34,19 @@ describe("newEvent", () => {
     }
     const loan = newEvent("family_loan", { firstChild: 2, firstGiftAccount: 1, age: 59, facts });
     expect(loan.type === "family_loan" && loan.loan.rate).toBe(0.0552);
+  });
+});
+
+describe("decision search", () => {
+  it("finds decisions by everyday words", () => {
+    const find = (q: string) =>
+      EVENT_CHOICES.filter((c) => matches(q, [c.title, c.blurb, CHOICE_KEYWORDS[c.type]])).map((c) => c.type);
+    expect(find("house")).toContain("home_help");
+    expect(find("college")).toEqual(expect.arrayContaining(["fund529", "pay_tuition_medical"]));
+    expect(find("trust")).toEqual(["grat"]);
+    expect(find("donate")).toEqual(expect.arrayContaining(["charity_gift", "charitable_bequest"]));
+    expect(find("loan")).toContain("family_loan");
+    for (const c of EVENT_CHOICES) expect(find(c.title), c.type).toContain(c.type);
   });
 });
 

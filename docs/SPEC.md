@@ -153,6 +153,11 @@ v2 hook: a "tax regime" setting that multiplies or replaces brackets and exempti
   4. Backup format v2: a list of households with their links; v1 opens as one household. New golden files `v2-family*.fsim`.
   5. A "Save & load" page in the sidebar replaces the Settings card, with a household list (open/delete) and automatic backups (which save the whole family).
   6. Next: Phase 8 (search on Scenarios, the decision picker and the Giving guide).
+- **2026-10-24: Phase 8 = search** (Jacob): "make the scenarios and giving all searchable so we don't have to scroll as we add more."
+  1. One matcher (`src/lib/search.ts`): all words must match, money normalized, a small synonym table.
+  2. Scenarios: search plus sort (newest / A–Z / most for the kids), cards or a compact list, and a sticky compare bar.
+  3. Decision picker: search with keywords per decision (`CHOICE_KEYWORDS`); Enter picks the first match.
+  4. Giving guide: search, tag chips (`Strategy.tags`), collapsed cards, and an "On this page" list.
 
 ## Verification
 - `cargo test -p engine`: tax tests against IRS worked examples and hand-computed cases (brackets, LTCG stacking, SS taxability, NIIT, RMD, gift/estate exemption). Golden-file projections for the demo households. Monte Carlo sanity checks: with zero volatility the result must equal the fixed-mode output, and a fixed seed must be reproducible.

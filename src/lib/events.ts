@@ -101,6 +101,23 @@ export const EVENT_CHOICES: { type: EventType; group: ChoiceGroup; title: string
   },
 ];
 
+/** Extra words people might search for, per decision. */
+export const CHOICE_KEYWORDS: Record<EventType, string> = {
+  home_help: "house down payment mortgage buy first home gift loan",
+  cash_gift: "money gift yearly annual exclusion tax-free each child",
+  family_loan: "lend loan afr interest forgive mortgage note",
+  gift_assets: "stock shares investments brokerage cost basis in kind meta",
+  fund529: "college school education 529 superfund tuition grandchild",
+  pay_tuition_medical: "college school tuition medical doctor hospital insurance health",
+  charity_gift: "donate donation charity donor-advised fund daf church foundation stock deduction",
+  charitable_bequest: "will estate charity donate ira beneficiary bequest",
+  family_llc: "llc company business partnership discount shares control",
+  grat: "trust annuity grat growth stock 7520",
+  roth_conversion: "roth ira convert tax retirement",
+  spending_change: "spend budget expenses lifestyle",
+  social_security_age: "social security ss claim benefits retire age",
+};
+
 export function eventTitle(type: EventType): string {
   return EVENT_CHOICES.find((c) => c.type === type)!.title;
 }

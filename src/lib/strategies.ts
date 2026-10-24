@@ -6,9 +6,20 @@ import { ageOf, giftableInKind, type Event, type Household } from "./types";
 
 export type StrategyStatus = "in_app" | "coming";
 
+export type StrategyTag = "kids" | "charity" | "advanced" | "taxes";
+
+export const STRATEGY_TAGS: { id: StrategyTag; label: string }[] = [
+  { id: "kids", label: "For the kids" },
+  { id: "charity", label: "Charity" },
+  { id: "advanced", label: "Advanced" },
+  { id: "taxes", label: "Taxes" },
+];
+
 export interface Strategy {
   id: string;
   title: string;
+  /** For the guide's filter chips. */
+  tags: StrategyTag[];
   status: StrategyStatus;
   /** When it's coming, which step builds it. */
   coming?: string;
@@ -40,6 +51,7 @@ export function strategies(facts: TaxFacts): Strategy[] {
   return [
     {
       id: "annual",
+      tags: ["kids"],
       title: "Yearly tax-free gifts",
       status: "in_app",
       summary: `Give each child up to ${excl} a year (${facts.taxYear}; it rises with inflation) without using any lifetime exemption.`,
@@ -65,6 +77,7 @@ export function strategies(facts: TaxFacts): Strategy[] {
     },
     {
       id: "home",
+      tags: ["kids"],
       title: "Help with a down payment",
       status: "in_app",
       summary: "A gift toward a child's home, optionally plus a family loan for part of the price.",
@@ -88,6 +101,7 @@ export function strategies(facts: TaxFacts): Strategy[] {
     },
     {
       id: "loan",
+      tags: ["kids"],
       title: "Family loans",
       status: "in_app",
       summary: `Lend at the IRS minimum rate (${(afrFor(15, facts) * 100).toFixed(2)}% for 15 years in ${afrMonthLabel(facts)}) and optionally forgive some each year.`,
@@ -125,6 +139,7 @@ export function strategies(facts: TaxFacts): Strategy[] {
     },
     {
       id: "stock",
+      tags: ["kids", "taxes"],
       title: "Give stock or investments",
       status: "in_app",
       summary:
@@ -150,6 +165,7 @@ export function strategies(facts: TaxFacts): Strategy[] {
     },
     {
       id: "big",
+      tags: ["kids", "taxes"],
       title: "A large gift now (use the exemption)",
       status: "in_app",
       summary: `Give a large amount now using part of your ${exemption} lifetime exemption, locking it in in case the law changes.`,
@@ -181,6 +197,7 @@ export function strategies(facts: TaxFacts): Strategy[] {
     },
     {
       id: "roth",
+      tags: ["taxes"],
       title: "Roth conversions",
       status: "in_app",
       summary: "Pay income tax now to move IRA money to a Roth, which your kids inherit tax-free.",
@@ -203,6 +220,7 @@ export function strategies(facts: TaxFacts): Strategy[] {
     },
     {
       id: "stepup",
+      tags: ["kids", "taxes"],
       title: "Keep low-basis assets until death",
       status: "in_app",
       summary: "The step-up in basis erases capital-gains tax on what you hold until death.",
@@ -213,6 +231,7 @@ export function strategies(facts: TaxFacts): Strategy[] {
     },
     {
       id: "education",
+      tags: ["kids"],
       title: "529 plans, tuition & medical bills",
       status: "in_app",
       summary: `Front-load five years of gifts (${money(5 * facts.annualExclusion)} per child) into a 529, or pay tuition and medical bills directly with no limit at all.`,
@@ -251,6 +270,7 @@ export function strategies(facts: TaxFacts): Strategy[] {
     },
     {
       id: "charity",
+      tags: ["charity", "taxes"],
       title: "Give to charity",
       status: "in_app",
       summary:
@@ -288,6 +308,7 @@ export function strategies(facts: TaxFacts): Strategy[] {
     },
     {
       id: "llc",
+      tags: ["advanced", "kids"],
       title: "Family LLC with a valuation discount",
       status: "in_app",
       summary:
@@ -328,6 +349,7 @@ export function strategies(facts: TaxFacts): Strategy[] {
     },
     {
       id: "grat",
+      tags: ["advanced", "kids"],
       title: "GRATs (annuity trusts)",
       status: "in_app",
       summary: `A trust pays you back what you put in plus interest at the IRS rate (${(facts.section7520 * 100).toFixed(1)}%); anything it grows beyond that goes to your kids, using no exemption.`,
