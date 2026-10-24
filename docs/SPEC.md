@@ -121,6 +121,24 @@ v2 hook: a "tax regime" setting that multiplies or replaces brackets and exempti
   4. Anti-clawback: the estate exemption is the larger of the exemption at death and the gifts already sheltered. Gift tax also never re-taxes sheltered gifts.
   5. "Safe" in the solver = 95% chance the money lasts (adjustable 90/95/98). It uses common random numbers across trial amounts, searches with 1,000 scenarios, and is re-checked at the full count.
   6. Meta's Jan 2027 Class C share dividend was researched for Mom. Conclusion: a split doesn't change a gift's value; the reason to give stock is estate math, weighed against losing the step-up in basis.
+- **2026-10-24: Phase 5.2 & 5.3** (charity, education, LLC, GRATs).
+  1. Itemized deductions follow the 2025 One Big Beautiful Bill Act rules from 2026 (values in `tax_tables/2026.json`):
+     - SALT cap $40,400 (+1%/yr to 2029, then $10,000), reduced 30% above $505,000 MAGI, floor $10,000
+     - mortgage interest on up to $750k of home debt
+     - charity: 0.5%-of-AGI floor; cash ≤60% and appreciated stock ≤30% of AGI; 5-year carryforward with this year's gifts used first; carryovers used up whether or not you itemize
+     - the 2/37 haircut caps top-bracket benefit at 35%
+     - $1,000/$2,000 for non-itemizers (cash to public charities, not donor-advised funds)
+     - State income tax for SALT is estimated as the flat rate × (AGI − standard deduction).
+  2. The gift ledger is separate from what each child receives:
+     - tuition and medical paid directly: received, never reported
+     - 529 superfunding: one-fifth a year, with the unspread part pulled back into the estate
+     - LLC shares: reported at the discount
+     - GRAT remainders: reported as $0 (zeroed-out GRAT)
+     - 529 growth is tax-free for the kids.
+  3. Family LLC: a non-spendable holding invested like its source account, taxed to the owner. The yearly gift share is of the whole LLC, split evenly. The owner's remaining share is discounted in the estate only at ≤50% ownership (no control). The IRS-risk caveat is shown in the form, the guide and the README.
+  4. GRATs: level annuity at the §7520 rate (6.20%, Nov 2026, held constant), paid at each anniversary. Rolling puts every payment into a new GRAT of the same term until the chosen age. Assets during a term stay in the estate (mortality risk). On the steady path the demo's mixed portfolio doesn't beat 6.2%, so GRATs show their value in the range of outcomes; Compare adds a 9-in-10 "strong markets" row when a plan has one.
+  5. Charitable bequest = a share of the gross estate, deducted before estate tax; optionally taken from traditional IRA money first.
+  6. New inputs: household home property tax and a "home mortgage" flag on debts (migration 0007).
 
 ## Verification
 - `cargo test -p engine`: tax tests against IRS worked examples and hand-computed cases (brackets, LTCG stacking, SS taxability, NIIT, RMD, gift/estate exemption). Golden-file projections for the demo households. Monte Carlo sanity checks: with zero volatility the result must equal the fixed-mode output, and a fixed seed must be reproducible.

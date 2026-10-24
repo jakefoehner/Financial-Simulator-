@@ -128,6 +128,8 @@ pub struct Afr {
     pub short_term: f64,
     pub mid_term: f64,
     pub long_term: f64,
+    /// IRS §7520 rate (120% of the mid-term AFR): values annuities such as GRAT payments.
+    pub section_7520: f64,
 }
 
 impl Afr {
@@ -137,6 +139,34 @@ impl Afr {
             0..=3 => self.short_term,
             4..=9 => self.mid_term,
             _ => self.long_term,
+        }
+    }
+}
+
+/// Itemized deductions (One Big Beautiful Bill Act rules from 2026).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Itemized {
+    pub salt_cap_by_year: BTreeMap<String, f64>,
+    pub salt_cap_after: f64,
+    pub salt_phaseout_start_by_year: BTreeMap<String, f64>,
+    pub salt_phaseout_rate: f64,
+    pub salt_floor: f64,
+    pub mortgage_debt_limit: f64,
+    pub charity_floor_pct_agi: f64,
+    pub charity_cash_limit_pct_agi: f64,
+    pub charity_property_limit_pct_agi: f64,
+    pub top_rate_benefit_cap: f64,
+    pub non_itemizer_charity: ByStatus<f64>,
+}
+
+impl Itemized {
+    /// SALT cap in `year` for a full (not married-separate) return: the scheduled cap less 30%
+    /// of MAGI above the threshold, never below the floor. After the schedule, a flat amount.
+    pub fn salt_cap(&self, year: i32, first_year: i32, magi: f64) -> f64 {
+        let key = year.max(first_year).to_string();
+        match (self.salt_cap_by_year.get(&key), self.salt_phaseout_start_by_year.get(&key)) {
+            (Some(cap), Some(start)) => (cap - self.salt_phaseout_rate * (magi - start).max(0.0)).max(self.salt_floor),
+            _ => self.salt_cap_after,
         }
     }
 }
@@ -157,6 +187,7 @@ pub struct TaxTables {
     pub irmaa: Irmaa,
     pub estate_gift: EstateGift,
     pub afr: Afr,
+    pub itemized: Itemized,
     pub rmd: Rmd,
 }
 
@@ -238,6 +269,18 @@ mod tests {
         assert_eq!(afr.for_years(3), 0.0467);
         assert_eq!(afr.for_years(9), 0.0508);
         assert_eq!(afr.for_years(15), 0.0552);
+        assert_eq!(afr.section_7520, 0.062);
+    }
+
+    #[test]
+    fn salt_cap_phases_down_and_reverts() {
+        let it = &TaxTables::current().itemized;
+        assert_eq!(it.salt_cap(2026, 2026, 300_000.0), 40_400.0);
+        // 30% of the 50,000 above 505,000 = 15,000 off.
+        assert_eq!(it.salt_cap(2026, 2026, 555_000.0), 25_400.0);
+        assert_eq!(it.salt_cap(2026, 2026, 2_000_000.0), 10_000.0);
+        assert_eq!(it.salt_cap(2029, 2026, 0.0), 41_624.0);
+        assert_eq!(it.salt_cap(2030, 2026, 0.0), 10_000.0);
     }
 
     #[test]

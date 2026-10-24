@@ -212,49 +212,159 @@ export function strategies(facts: TaxFacts): Strategy[] {
       inApp: "Built into every estate result: inherited assets owe no capital-gains tax; gifts do.",
     },
     {
-      id: "charity",
-      title: "Give to charity",
-      status: "coming",
-      coming: "next update (5.2)",
-      summary: "Gifts of cash or appreciated stock to a charity or donor-advised fund, and charitable bequests.",
-      how: "Giving appreciated stock avoids its capital-gains tax and can be deducted at market value (within limits, if you itemize). A charitable bequest is deducted from the estate.",
-      pros: ["Lowers income tax and estate tax", "Donor-advised funds let you give now and pick charities later"],
-      cons: ["Money goes to charity, not family"],
-      inApp: "Coming: charity decisions, itemized deductions under the 2026 rules, and charitable bequests.",
-    },
-    {
       id: "education",
       title: "529 plans, tuition & medical bills",
-      status: "coming",
-      coming: "next update (5.2)",
-      summary: "Front-load five years of gifts into a 529, or pay tuition and medical bills directly with no limit.",
-      how: "A 529 can take five years of yearly exclusions at once. Paying a school or medical provider directly doesn't count as a gift at all.",
-      pros: ["Moves money out quickly", "Direct tuition and medical payments are unlimited and tax-free"],
-      cons: ["529 money is meant for education", "Direct payments must go to the school or provider"],
-      inApp: "Coming.",
+      status: "in_app",
+      summary: `Front-load five years of gifts (${money(5 * facts.annualExclusion)} per child) into a 529, or pay tuition and medical bills directly with no limit at all.`,
+      how: `A 529 grows tax-free for school, and you can count up to five years of the ${excl} yearly exclusion at once ("superfunding"), so it uses no lifetime exemption. You stay the owner and can switch the beneficiary within the family. Separately, tuition or medical bills you pay straight to the school or provider aren't gifts at all: no limit, and you can still give the yearly ${excl} on top.`,
+      pros: [
+        "Moves money and its growth out of your estate quickly",
+        "Direct tuition and medical payments are unlimited and use no exemption",
+        "529 growth is tax-free for education; the beneficiary can change",
+      ],
+      cons: [
+        "529 money is meant for education (other uses owe tax and a 10% penalty on earnings)",
+        "Superfunding uses up five years of yearly gifts to that child",
+        "Direct payments must go to the school or provider, and only tuition counts (not room and board)",
+      ],
+      inApp:
+        "The 529 is spread over five years in the gift ledger (pulled back into the estate if you die within them) and grows tax-free in each child's total. Tuition and medical payments count toward what the child receives but never toward the gift ledger.",
+      tryIt: (h) => {
+        const kids = h.people.filter((p) => p.role === "child");
+        if (kids.length === 0) return null;
+        const age = nextAge(h);
+        return {
+          name: "529s and tuition",
+          notes: "A superfunded 529 for each child, plus four years of tuition paid directly. Edit the amounts.",
+          events: [
+            ...kids.map((k): Event => ({
+              type: "fund529",
+              to: k.id!,
+              age,
+              amount: 5 * facts.annualExclusion,
+              superfund: true,
+            })),
+            { type: "pay_tuition_medical", to: kids[0].id!, amount: 60_000, fromAge: age, years: 4 },
+          ],
+        };
+      },
+    },
+    {
+      id: "charity",
+      title: "Give to charity",
+      status: "in_app",
+      summary:
+        "Give cash or appreciated stock to a charity or donor-advised fund, or leave part of your estate to charity.",
+      how: "Giving stock you've owned over a year avoids its capital-gains tax and is deductible at full market value (up to 30% of your income a year; cash up to 60%, with the rest carried forward five years). From 2026 only giving above 0.5% of your income counts if you itemize, and top-bracket deductions are worth 35 cents per dollar. A donor-advised fund lets you take the deduction now, bunching several years so itemizing pays off, and pick charities later. A charitable bequest is deducted from the estate, and IRA money is the best thing to leave, since a charity owes no income tax on it but your kids would.",
+      pros: [
+        "Lowers income tax now and estate tax later",
+        "Appreciated stock avoids capital-gains tax entirely",
+        "A donor-advised fund separates the tax deduction from choosing charities",
+      ],
+      cons: ["Money goes to charity, not family", "Deductions only help if you itemize (beyond a small $1,000 amount)"],
+      inApp:
+        "Itemized deductions (property tax under the SALT cap, mortgage interest, charity with its limits, floor and carryforward) versus the standard deduction each year, and charitable bequests in the estate, from IRA money first if you choose.",
+      tryIt: (h) => {
+        const account = h.accounts.find((a) => giftableInKind(a.accountType));
+        const age = nextAge(h);
+        return {
+          name: "Give to charity",
+          notes: account
+            ? `Appreciated stock from ${account.name} to a donor-advised fund for five years, and 10% of the estate to charity from IRA money.`
+            : "Cash to charity for five years, and 10% of the estate to charity from IRA money.",
+          events: [
+            {
+              type: "charity_gift",
+              amount: 100_000,
+              fromAge: age,
+              years: 5,
+              accountId: account?.id ?? null,
+              donorAdvised: true,
+            },
+            { type: "charitable_bequest", share: 0.1, fromIraFirst: true },
+          ],
+        };
+      },
     },
     {
       id: "llc",
       title: "Family LLC with a valuation discount",
-      status: "coming",
-      coming: "a later update (5.3)",
+      status: "in_app",
       summary:
-        "Put assets in a family LLC and give shares, which are valued lower because they're hard to sell and don't control the LLC.",
-      how: "Shares in a family LLC are often valued 20–35% below the assets inside, so each dollar of exemption moves more. The IRS scrutinizes these, so it needs an attorney and a real business purpose.",
-      pros: ["Moves more value per dollar of exemption", "You can keep control as manager"],
-      cons: ["Legal setup and upkeep", "IRS scrutiny"],
-      inApp: "Coming.",
+        "Put investments in a family LLC and give the kids shares over time, valued lower because they're hard to sell and don't control anything.",
+      how: "You move investments into an LLC and keep managing them. Each year you give the kids LLC shares. Because a minority share can't be sold easily or control the LLC, an appraiser values it 20–35% below its slice of the assets, so each dollar of exclusion or exemption moves more. Once you own half or less, your own remaining share gets the discount in your estate too. The IRS scrutinizes these: it needs a real purpose beyond taxes, a qualified appraisal, and the formalities kept up.",
+      pros: [
+        "Moves more value per dollar of exemption",
+        "You keep control as manager",
+        "Keeps family investments together",
+      ],
+      cons: [
+        "Legal setup, appraisals and yearly upkeep",
+        "IRS scrutiny: aggressive discounts get challenged",
+        "Shares given carry your cost basis (no step-up)",
+      ],
+      inApp:
+        "The LLC as its own holding (still taxed to you), yearly share gifts reported at the discount, your remaining share discounted once you no longer control it, and each child's total.",
+      tryIt: (h) => {
+        const account = h.accounts.find((a) => giftableInKind(a.accountType));
+        return firstChild(h) && account
+          ? {
+              name: "Family LLC",
+              notes: `${money(3_000_000)} from ${account.name}, 10% of the LLC to the kids each year for 10 years at a 30% discount.`,
+              events: [
+                {
+                  type: "family_llc",
+                  accountId: account.id!,
+                  age: nextAge(h),
+                  amount: 3_000_000,
+                  discount: 0.3,
+                  giftShare: 0.1,
+                  years: 10,
+                },
+              ],
+            }
+          : null;
+      },
     },
     {
       id: "grat",
-      title: "GRATs",
-      status: "coming",
-      coming: "a later update (5.3)",
-      summary: "A trust that passes a fast-growing asset's growth above an IRS rate to your kids nearly tax-free.",
-      how: "You put an asset (like a stock you expect to grow) in a trust that pays you back over a couple of years; anything it grows beyond the IRS rate goes to your kids, using little or no exemption.",
-      pros: ["Moves upside with little exemption", "Low risk: if the asset falls, you just get it back"],
-      cons: ["Needs an attorney", "If you die during the term, it's back in your estate"],
-      inApp: "Coming.",
+      title: "GRATs (annuity trusts)",
+      status: "in_app",
+      summary: `A trust pays you back what you put in plus interest at the IRS rate (${(facts.section7520 * 100).toFixed(1)}%); anything it grows beyond that goes to your kids, using no exemption.`,
+      how: `You put investments in a GRAT, typically for two years. It pays you a fixed amount each year, worth exactly what you put in at the IRS §7520 rate (${(facts.section7520 * 100).toFixed(1)}% in ${afrMonthLabel(facts)}), so the gift counts as about $0. Growth above that rate goes to your kids at the end. If the investments don't beat the rate, everything comes back to you and you've lost little. "Rolling" GRATs put each payment into a new one, catching more good years. If you die during a term, that GRAT is counted back in your estate.`,
+      pros: [
+        "Moves upside with no exemption used",
+        "Low risk: in a bad market you simply get your money back",
+        "Works best on volatile, fast-growing stock",
+      ],
+      cons: [
+        "Only pays off when returns beat the IRS rate, so it shines in some years, not all",
+        "Needs an attorney and careful paperwork",
+        "What passes keeps your cost basis",
+      ],
+      inApp:
+        "GRATs held separately (taxed to you), annuity payments back or rolled, remainders to the kids at your basis, all across the range of markets.",
+      tryIt: (h) => {
+        const account = h.accounts.find((a) => giftableInKind(a.accountType));
+        const age = nextAge(h);
+        return firstChild(h) && account
+          ? {
+              name: "Rolling GRATs",
+              notes: `${money(2_000_000)} from ${account.name} in 2-year GRATs, rolled for 10 years. Compare results in the range of outcomes: GRATs pay off in strong markets.`,
+              events: [
+                {
+                  type: "grat",
+                  accountId: account.id!,
+                  age,
+                  amount: 2_000_000,
+                  termYears: 2,
+                  rolling: true,
+                  untilAge: age + 10,
+                },
+              ],
+            }
+          : null;
+      },
     },
   ];
 }

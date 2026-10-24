@@ -281,7 +281,7 @@ pub fn delete_income(conn: &Connection, id: Id) -> Result<()> {
 
 // --- Debt ------------------------------------------------------------------
 
-const DEBT_COLS: &str = "id, name, kind, balance, interest_rate, monthly_payment, account_id, notes";
+const DEBT_COLS: &str = "id, name, kind, balance, interest_rate, monthly_payment, account_id, notes, home_mortgage";
 
 fn debt_from_row(r: &Row) -> rusqlite::Result<Debt> {
     Ok(Debt {
@@ -293,6 +293,7 @@ fn debt_from_row(r: &Row) -> rusqlite::Result<Debt> {
         monthly_payment: r.get(5)?,
         account_id: r.get(6)?,
         notes: r.get(7)?,
+        home_mortgage: r.get(8)?,
     })
 }
 
@@ -302,7 +303,7 @@ pub(super) fn list_debts(conn: &Connection) -> Result<Vec<Debt>> {
 
 pub(super) fn insert_debt(conn: &Connection, d: &Debt) -> Result<Id> {
     conn.execute(
-        &format!("INSERT INTO debt ({DEBT_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"),
+        &format!("INSERT INTO debt ({DEBT_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"),
         params![
             d.id,
             d.name.trim(),
@@ -311,7 +312,8 @@ pub(super) fn insert_debt(conn: &Connection, d: &Debt) -> Result<Id> {
             d.interest_rate,
             d.monthly_payment,
             d.account_id,
-            d.notes
+            d.notes,
+            d.home_mortgage
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -324,7 +326,7 @@ pub fn upsert_debt(conn: &Connection, d: &Debt) -> Result<Id> {
         conn,
         "debt",
         "UPDATE debt SET name = ?2, kind = ?3, balance = ?4, interest_rate = ?5, monthly_payment = ?6,
-             account_id = ?7, notes = ?8
+             account_id = ?7, notes = ?8, home_mortgage = ?9
          WHERE id = ?1",
         params![
             id,
@@ -334,7 +336,8 @@ pub fn upsert_debt(conn: &Connection, d: &Debt) -> Result<Id> {
             d.interest_rate,
             d.monthly_payment,
             d.account_id,
-            d.notes
+            d.notes,
+            d.home_mortgage
         ],
     )?;
     Ok(id)
@@ -552,6 +555,7 @@ mod tests {
                 monthly_payment: 500.0,
                 account_id: Some(aid),
                 notes: String::new(),
+                home_mortgage: false,
             },
         )
         .unwrap();

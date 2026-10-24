@@ -11,12 +11,21 @@ export interface Balances {
   loansReceivable: number;
   /** Private funds and startups (not spendable until they pay out). */
   private: number;
+  /** Your remaining share of a family LLC. */
+  familyLlc: number;
+  /** Assets inside GRATs still in their term. */
+  grats: number;
 }
 
 export interface TaxResult {
   agi: number;
   taxableSocialSecurity: number;
   deduction: number;
+  itemized: boolean;
+  itemizedDeductions: number;
+  charityDeduction: number;
+  charityCashAbsorbed: number;
+  charityPropertyAbsorbed: number;
   taxableIncome: number;
   ordinaryTax: number;
   capitalGainsTax: number;
@@ -51,7 +60,7 @@ export interface YearResult {
   shortfall: number;
   /** Gifts this year including forgiven loan principal; `cashGifts` is just the cash given. */
   gifts: number;
-  giftsByChild: { childId: number; amount: number; basis: number }[];
+  giftsByChild: { childId: number; amount: number; basis: number; taxFree: number }[];
   giftTax: number;
   cashGifts: number;
   loansMade: number;
@@ -62,6 +71,16 @@ export interface YearResult {
   privateIncome: number;
   privateProceeds: number;
   shelteredGifts: number;
+  /** Given to charity: cash plus investments at market value; `charityCash` is just the cash. */
+  charity: number;
+  charityCash: number;
+  charityCarryforward: number;
+  /** 529s plus tuition/medical paid directly. */
+  education: number;
+  superfundPending: number;
+  llcGifts: number;
+  llcDiscount: number;
+  gratRemainders: number;
   tax: TaxResult;
   balances: Balances;
   debtBalance: number;
@@ -97,6 +116,10 @@ export interface EstateResult {
   heirCapitalGainsRate: number;
   heirsCapitalGainsTaxReal: number;
   antiClawbackApplies: boolean;
+  charitableBequestReal: number;
+  lifetimeCharityReal: number;
+  llcDiscountReal: number;
+  superfundIncludedReal: number;
   familyTotalReal: number;
   children: ChildEstate[];
 }
@@ -173,7 +196,7 @@ export const BALANCE_SERIES = [
   {
     key: "realEstate",
     label: "Real estate & other",
-    hint: "Homes, property, private funds and startups, any 529s, and family loans owed to you",
+    hint: "Homes, property, private funds and startups, any 529s, family loans owed to you, and your family LLC share and GRATs",
   },
 ] as const;
 
@@ -201,9 +224,15 @@ export function balanceRows(p: Projection, mode: DollarMode): BalanceRow[] {
       taxable: d(y.balances.taxable),
       taxDeferred: d(y.balances.taxDeferred),
       taxFree: d(y.balances.taxFree),
-      // 529s are rare and small; fold them into the top band instead of adding a 6th color.
-      // 529s and family loans are rare and small; fold them into the top band instead of adding colors.
-      realEstate: d(y.balances.realEstate + y.balances.education + y.balances.loansReceivable + y.balances.private),
+      // 529s, family loans, private funds, an LLC and GRATs fold into the top band instead of adding colors.
+      realEstate: d(
+        y.balances.realEstate +
+          y.balances.education +
+          y.balances.loansReceivable +
+          y.balances.private +
+          y.balances.familyLlc +
+          y.balances.grats,
+      ),
       debt: d(y.debtBalance),
       netWorth: d(y.netWorth),
     };
@@ -217,7 +246,7 @@ export interface CashFlowRow {
   socialSecurity: number;
   fromSavings: number;
   spending: number;
-  /** Cash gifts, money lent to family, and any gift tax. */
+  /** Cash gifts, money lent to family, cash to charity, 529s and tuition, and any gift tax. */
   giving: number;
   taxes: number;
   saved: number;
@@ -238,7 +267,7 @@ export function cashFlowRows(p: Projection, mode: DollarMode): CashFlowRow[] {
       // RMDs are forced withdrawals, so they count as money from savings.
       fromSavings: f(y.withdrawals + y.requiredDistributions),
       spending: f(y.spending + y.oneTimeExpenses + y.debtPayments),
-      giving: f(y.cashGifts + y.loansMade + y.giftTax),
+      giving: f(y.cashGifts + y.loansMade + y.giftTax + y.charityCash + y.education),
       taxes: f(y.taxes + y.medicareSurcharge),
       saved: f(y.saved + y.contributions),
       shortfall: f(y.shortfall),

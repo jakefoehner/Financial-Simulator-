@@ -1,6 +1,6 @@
 import { Plus } from "lucide-react";
 import { Button, EmptyState, PageHeader, RecordList } from "../components/Card";
-import { MoneyField, PercentField, Row, SelectField, TextField } from "../components/fields";
+import { MoneyField, PercentField, Row, SelectField, TextField, Toggle } from "../components/fields";
 import { Sheet } from "../components/Sheet";
 import { api } from "../lib/api";
 import { formatPercent, formatUsd } from "../lib/format";
@@ -19,6 +19,7 @@ function newDebt(): Debt {
     monthlyPayment: 0,
     accountId: null,
     notes: "",
+    homeMortgage: true,
   };
 }
 
@@ -133,6 +134,14 @@ export default function Debts() {
                 { value: 0, label: "Nothing" },
                 ...accounts.map((a) => ({ value: a.id!, label: `${a.name} (${ACCOUNT_TYPE_LABELS[a.accountType]})` })),
               ]}
+            />
+          )}
+          {ed.draft.kind === "mortgage" && (
+            <Toggle
+              label="This is the mortgage on my home"
+              hint="Its interest can be deducted if you itemize (on up to $750K of the loan). Leave off for rental properties."
+              checked={ed.draft.homeMortgage}
+              onChange={(v) => ed.set("homeMortgage", v)}
             />
           )}
           <TextField label="Notes" value={ed.draft.notes} onChange={(v) => ed.set("notes", v)} placeholder="Optional" />

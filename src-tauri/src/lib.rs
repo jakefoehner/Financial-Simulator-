@@ -97,6 +97,7 @@ struct TaxFacts {
     afr_short_term: f64,
     afr_mid_term: f64,
     afr_long_term: f64,
+    section_7520: f64,
 }
 
 #[tauri::command]
@@ -110,6 +111,7 @@ fn tax_facts() -> TaxFacts {
         afr_short_term: t.afr.short_term,
         afr_mid_term: t.afr.mid_term,
         afr_long_term: t.afr.long_term,
+        section_7520: t.afr.section_7520,
     }
 }
 

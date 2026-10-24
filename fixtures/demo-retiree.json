@@ -4,7 +4,8 @@
     "state": "TX",
     "flatStateRate": 0,
     "filingStatus": "single",
-    "baseAnnualSpending": 300000
+    "baseAnnualSpending": 300000,
+    "homePropertyTax": 30000
   },
   "people": [
     {
@@ -225,7 +226,8 @@
       "interestRate": 0.03125,
       "monthlyPayment": 2300,
       "accountId": 7,
-      "notes": ""
+      "notes": "",
+      "homeMortgage": false
     }
   ],
   "oneTimeExpenses": [
@@ -318,6 +320,86 @@
           "fromAge": 59,
           "years": 1,
           "maxAnnualExclusion": false
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Charity: stock to a donor-advised fund",
+      "notes": "$200K a year of appreciated stock to a donor-advised fund for five years, and 10% of the estate to charity from the IRA.",
+      "events": [
+        {
+          "type": "charity_gift",
+          "amount": 200000,
+          "fromAge": 59,
+          "years": 5,
+          "accountId": 1,
+          "donorAdvised": true
+        },
+        {
+          "type": "charitable_bequest",
+          "share": 0.1,
+          "fromIraFirst": true
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "529s and tuition",
+      "notes": "A superfunded 529 for each kid, plus Jordan's grad-school tuition paid directly.",
+      "events": [
+        {
+          "type": "fund529",
+          "to": 2,
+          "age": 59,
+          "amount": 95000,
+          "superfund": true
+        },
+        {
+          "type": "fund529",
+          "to": 3,
+          "age": 59,
+          "amount": 95000,
+          "superfund": true
+        },
+        {
+          "type": "pay_tuition_medical",
+          "to": 3,
+          "amount": 70000,
+          "fromAge": 59,
+          "years": 2
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Family LLC",
+      "notes": "$4M of brokerage investments in a family LLC; 10% of it to the kids each year for 10 years at a 30% discount.",
+      "events": [
+        {
+          "type": "family_llc",
+          "accountId": 1,
+          "age": 59,
+          "amount": 4000000,
+          "discount": 0.3,
+          "giftShare": 0.1,
+          "years": 10
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "Rolling GRATs",
+      "notes": "$3M of brokerage stock in 2-year GRATs, rolled until 70. Look at strong markets: that's where GRATs pay off.",
+      "events": [
+        {
+          "type": "grat",
+          "accountId": 1,
+          "age": 59,
+          "amount": 3000000,
+          "termYears": 2,
+          "rolling": true,
+          "untilAge": 70
         }
       ]
     }

@@ -3,7 +3,15 @@ import { useState } from "react";
 import { Button, Card, EmptyState } from "../../components/Card";
 import { TextField } from "../../components/fields";
 import { api } from "../../lib/api";
-import { EVENT_CHOICES, eventAge, eventSummary, newEvent } from "../../lib/events";
+import {
+  CHOICE_GROUPS,
+  EVENT_CHOICES,
+  eventAge,
+  eventSummary,
+  NEEDS_GIFT_ACCOUNT,
+  NEEDS_KIDS,
+  newEvent,
+} from "../../lib/events";
 import { formatPercent, formatUsdCompact } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import { ageOf, giftableInKind, type Event, type EventType, type Household, type Scenario } from "../../lib/types";
@@ -115,27 +123,34 @@ export default function ScenarioEditor({
       >
         {needsKids && (
           <p className="mb-3 text-sm text-[var(--muted)]">
-            Gifts, home help, and loans need your children listed on the People page.
+            Gifts, home help, loans, 529s, an LLC and GRATs need your children listed on the People page.
           </p>
         )}
         {choosing && (
-          <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-3">
-            {EVENT_CHOICES.map((c) => {
-              const disabled =
-                (needsKids && ["home_help", "cash_gift", "family_loan", "gift_assets"].includes(c.type)) ||
-                (c.type === "gift_assets" && giftAccounts.length === 0);
-              return (
-                <button
-                  key={c.type}
-                  onClick={() => start(c.type)}
-                  disabled={disabled}
-                  className="rounded-lg border border-[var(--border)] p-3 text-left transition hover:border-accent disabled:opacity-40"
-                >
-                  <p className="text-sm font-medium">{c.title}</p>
-                  <p className="mt-0.5 text-xs text-[var(--muted)]">{c.blurb}</p>
-                </button>
-              );
-            })}
+          <div className="mb-4 grid gap-4">
+            {CHOICE_GROUPS.map((g) => (
+              <section key={g.id}>
+                <h3 className="mb-2 text-xs font-semibold tracking-wide text-[var(--muted)] uppercase">{g.title}</h3>
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+                  {EVENT_CHOICES.filter((c) => c.group === g.id).map((c) => {
+                    const disabled =
+                      (needsKids && NEEDS_KIDS.includes(c.type)) ||
+                      (giftAccounts.length === 0 && NEEDS_GIFT_ACCOUNT.includes(c.type));
+                    return (
+                      <button
+                        key={c.type}
+                        onClick={() => start(c.type)}
+                        disabled={disabled}
+                        className="rounded-lg border border-[var(--border)] p-3 text-left transition hover:border-accent disabled:opacity-40"
+                      >
+                        <p className="text-sm font-medium">{c.title}</p>
+                        <p className="mt-0.5 text-xs text-[var(--muted)]">{c.blurb}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>
         )}
         {ordered.length === 0 ? (

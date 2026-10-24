@@ -12,6 +12,7 @@ import { money } from "./shared";
 export default function FamilyCard({ estate, range }: { estate: EstateResult; range?: EstateRange }) {
   const hasGifts = estate.lifetimeGiftsReal > 0.5;
   const iraInherited = estate.heirIncomeTaxRate > 0 ? estate.heirsIncomeTaxReal / estate.heirIncomeTaxRate : 0;
+  const charity = estate.lifetimeCharityReal + estate.charitableBequestReal;
 
   return (
     <Card title={`For the family, at age ${estate.age} (today's dollars)`}>
@@ -88,6 +89,28 @@ export default function FamilyCard({ estate, range }: { estate: EstateResult; ra
           {hasGifts &&
             ` Gifts are shown grown to that age at your portfolio's return, as if your kids invested them, minus the ${formatPercent(estate.heirCapitalGainsRate, 0)} capital-gains tax they'd owe selling (${formatUsdCompact(estate.heirsCapitalGainsTaxReal)} in all).`}
         </li>
+        {charity > 0.5 && (
+          <li>
+            <strong className="font-medium text-[var(--text)]">Charity receives {formatUsdCompact(charity)}</strong>
+            {estate.lifetimeCharityReal > 0.5 && ` (${formatUsdCompact(estate.lifetimeCharityReal)} during your life`}
+            {estate.lifetimeCharityReal > 0.5 && estate.charitableBequestReal > 0.5 && ", "}
+            {estate.charitableBequestReal > 0.5 &&
+              `${estate.lifetimeCharityReal > 0.5 ? "" : " ("}${formatUsdCompact(estate.charitableBequestReal)} in your will, deducted before estate tax`}
+            ).
+          </li>
+        )}
+        {estate.llcDiscountReal > 0.5 && (
+          <li>
+            Your remaining family LLC share is valued {formatUsdCompact(estate.llcDiscountReal)} lower for estate tax,
+            since you no longer control the LLC.
+          </li>
+        )}
+        {estate.superfundIncludedReal > 0.5 && (
+          <li>
+            {formatUsdCompact(estate.superfundIncludedReal)} of 529 superfunding is counted back in the estate, because
+            it falls within its five-year spread.
+          </li>
+        )}
         {estate.antiClawbackApplies && (
           <li>
             <strong className="font-medium text-[var(--text)]">Your earlier gifts are protected:</strong> they used the

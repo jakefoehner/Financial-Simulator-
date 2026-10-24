@@ -7,7 +7,8 @@
     "CMS 2026 Medicare Parts A & B premiums fact sheet (IRMAA tiers)",
     "IRS Uniform Lifetime Table (Treas. Reg. 1.401(a)(9)-9, effective 2022); SECURE 2.0 RMD ages",
     "Estate & gift: One Big Beautiful Bill Act (2025) sets a permanent $15M exemption for 2026, indexed from 2027; IRS Rev. Proc. 2025-32 keeps the annual exclusion at $19,000",
-    "AFR: IRS Rev. Rul. 2026-21, Table 1 (November 2026), annual compounding"
+    "AFR: IRS Rev. Rul. 2026-21, Table 1 (November 2026), annual compounding; Section 7520 rate from Table 5",
+    "Itemized deductions: One Big Beautiful Bill Act (2025): SALT cap $40,400 for 2026 (+1%/yr through 2029, $10,000 from 2030) reduced by 30% of MAGI above $505,000 (not below $10,000); 0.5%-of-AGI floor on charitable deductions; itemized benefit capped at 35% for the 37% bracket; $1,000/$2,000 cash charitable deduction for non-itemizers"
   ],
   "notes": "Amounts marked indexed grow with the simulation's inflation assumption after 2026. Statutory amounts (NIIT, additional Medicare, Social Security taxation, child tax credit phase-out) are not indexed by law.",
 
@@ -149,7 +150,23 @@
     "month": "2026-11",
     "short_term": 0.0467,
     "mid_term": 0.0508,
-    "long_term": 0.0552
+    "long_term": 0.0552,
+    "section_7520": 0.062
+  },
+
+  "itemized": {
+    "comment": "SALT cap and phase-down threshold by year (+1%/yr, not inflation-indexed); after 2029 a flat $10,000. Married filing separately: half.",
+    "salt_cap_by_year": { "2026": 40400, "2027": 40804, "2028": 41212, "2029": 41624 },
+    "salt_cap_after": 10000,
+    "salt_phaseout_start_by_year": { "2026": 505000, "2027": 510050, "2028": 515151, "2029": 520302 },
+    "salt_phaseout_rate": 0.30,
+    "salt_floor": 10000,
+    "mortgage_debt_limit": 750000,
+    "charity_floor_pct_agi": 0.005,
+    "charity_cash_limit_pct_agi": 0.60,
+    "charity_property_limit_pct_agi": 0.30,
+    "top_rate_benefit_cap": 0.35,
+    "non_itemizer_charity": { "single": 1000, "married_joint": 2000, "married_separate": 1000, "head_of_household": 1000 }
   },
 
   "rmd": {

@@ -94,7 +94,8 @@ pub fn save_assumptions(conn: &Connection, a: &Assumptions) -> Result<()> {
 
 fn get_info(conn: &Connection) -> Result<HouseholdInfo> {
     Ok(conn.query_row(
-        "SELECT name, state, flat_state_rate, filing_status, base_annual_spending FROM household WHERE id = 1",
+        "SELECT name, state, flat_state_rate, filing_status, base_annual_spending, home_property_tax
+         FROM household WHERE id = 1",
         [],
         |r| {
             Ok(HouseholdInfo {
@@ -103,6 +104,7 @@ fn get_info(conn: &Connection) -> Result<HouseholdInfo> {
                 flat_state_rate: r.get(2)?,
                 filing_status: enum_col(r, 3, FilingStatus::parse)?,
                 base_annual_spending: r.get(4)?,
+                home_property_tax: r.get(5)?,
             })
         },
     )?)
@@ -113,14 +115,15 @@ pub fn save_info(conn: &Connection, info: &HouseholdInfo) -> Result<()> {
     conn.execute(
         "UPDATE household SET
              name = ?1, state = ?2, flat_state_rate = ?3, filing_status = ?4, base_annual_spending = ?5,
-             updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+             home_property_tax = ?6, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
          WHERE id = 1",
         params![
             info.name.trim(),
             info.state,
             info.flat_state_rate,
             info.filing_status.as_str(),
-            info.base_annual_spending
+            info.base_annual_spending,
+            info.home_property_tax
         ],
     )?;
     Ok(())

@@ -12,6 +12,7 @@ const facts: TaxFacts = {
   afrShortTerm: 0.0467,
   afrMidTerm: 0.0508,
   afrLongTerm: 0.0552,
+  section7520: 0.062,
 };
 const retiree = retireeJson as unknown as Household;
 
@@ -30,10 +31,8 @@ describe("strategies", () => {
     }
   });
 
-  it("marks future strategies as coming", () => {
-    const coming = strategies(facts)
-      .filter((s) => s.status === "coming")
-      .map((s) => s.id);
-    expect(coming).toEqual(["charity", "education", "llc", "grat"]);
+  it("has every strategy in the app now", () => {
+    expect(strategies(facts).filter((s) => s.status === "coming")).toEqual([]);
+    expect(strategies(facts).find((s) => s.id === "grat")!.summary).toContain("6.2%");
   });
 });

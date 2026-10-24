@@ -12,6 +12,7 @@ const facts: TaxFacts = {
   afrShortTerm: 0.0467,
   afrMidTerm: 0.0508,
   afrLongTerm: 0.0552,
+  section7520: 0.062,
 };
 const names: Record<number, string> = { 2: "Sam", 3: "Jordan" };
 const summary = (e: Event) => eventSummary(e, (id) => names[id], formatUsdCompact, formatPercent);
@@ -68,6 +69,31 @@ describe("eventSummary", () => {
         () => "Taxable brokerage",
       ),
     ).toBe("Age 59 · Give each child $1M from Taxable brokerage");
+  });
+
+  it("describes charity, education, LLC and GRAT decisions", () => {
+    const acct = () => "Brokerage";
+    const s = (e: Event) => eventSummary(e, (id) => names[id], formatUsdCompact, formatPercent, acct);
+    expect(s({ type: "charity_gift", amount: 100_000, fromAge: 60, years: 5, accountId: 1, donorAdvised: true })).toBe(
+      "Ages 60–64 · Give $100K a year in stock from Brokerage to a donor-advised fund",
+    );
+    expect(s({ type: "charitable_bequest", share: 0.1, fromIraFirst: true })).toBe(
+      "In your will · Leave 10% of your estate to charity, IRA money first",
+    );
+    expect(s({ type: "fund529", to: 2, age: 59, amount: 95_000, superfund: true })).toBe(
+      "Age 59 · Put $95K in a 529 for Sam (spread over 5 years)",
+    );
+    expect(s({ type: "pay_tuition_medical", to: 3, amount: 60_000, fromAge: 59, years: 4 })).toBe(
+      "Ages 59–62 · Pay $60K a year of Jordan's tuition or medical bills",
+    );
+    expect(
+      s({ type: "family_llc", accountId: 1, age: 59, amount: 3_000_000, discount: 0.3, giftShare: 0.1, years: 10 }),
+    ).toBe(
+      "Age 59 · Put $3M from Brokerage in a family LLC; give the kids 10% of it a year for 10 yrs at a 30% discount",
+    );
+    expect(
+      s({ type: "grat", accountId: 1, age: 59, amount: 2_000_000, termYears: 2, rolling: true, untilAge: 69 }),
+    ).toBe("Age 59 · Put $2M from Brokerage in a 2-year GRAT, rolling into new ones until 69");
   });
 
   it("orders decisions by when they start", () => {

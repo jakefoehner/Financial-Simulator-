@@ -53,6 +53,11 @@ export default function Compare({
   const endAge = results[0].sim.ages.at(-1);
   const kids = results[0].sim.estate.children;
   const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const charityOf = (r: PlanResult) =>
+    r.steady.summary.estate.lifetimeCharityReal + r.steady.summary.estate.charitableBequestReal;
+  const eventsOf = (r: PlanResult) => household.scenarios.find((s) => s.id === r.id)?.events ?? [];
+  const anyCharity = results.some((r) => charityOf(r) > 0.5);
+  const anyGrat = results.some((r) => eventsOf(r).some((e) => e.type === "grat"));
   const rows: { label: string; hint?: string; cell: (r: PlanResult) => string }[] = [
     { label: "Chance the money lasts", cell: (r) => pct(r.sim.moneyLasts) },
     { label: "Chance you live off growth & income", cell: (r) => pct(r.sim.livesOffGrowth) },
@@ -68,6 +73,18 @@ export default function Compare({
     { label: "Estate tax (typical)", cell: (r) => formatUsdCompact(r.sim.estate.estateTaxReal.p50) },
     { label: "The kids receive in total (typical)", cell: (r) => formatUsdCompact(r.sim.estate.familyTotalReal.p50) },
     { label: "The kids receive, rough markets", cell: (r) => formatUsdCompact(r.sim.estate.familyTotalReal.p10) },
+    // GRATs pay off in strong markets, so show that end of the range when one is in play.
+    ...(anyGrat
+      ? [
+          {
+            label: "The kids receive, strong markets",
+            cell: (r: PlanResult) => formatUsdCompact(r.sim.estate.familyTotalReal.p90),
+          },
+        ]
+      : []),
+    ...(anyCharity
+      ? [{ label: "To charity (life + will)", cell: (r: PlanResult) => formatUsdCompact(charityOf(r)) }]
+      : []),
     ...kids.map((k, i) => ({
       label: `${k.name} receives (typical)`,
       cell: (r: PlanResult) => formatUsdCompact(r.sim.estate.children[i]?.totalReal.p50 ?? 0),
@@ -109,9 +126,10 @@ export default function Compare({
         </table>
         <p className="mt-3 text-xs text-[var(--muted)]">
           "Typical" is the middle of {results[0].sim.scenarios.toLocaleString("en-US")} market scenarios; "rough
-          markets" is 1 in 10. What the kids receive counts gifts grown to age {results[0].sim.estate.age} at your
-          portfolio's return, plus the inheritance after estate tax and an assumed{" "}
-          {Math.round(household.assumptions.heirIncomeTaxRate * 100)}% income tax on inherited retirement accounts.
+          markets" is 1 in 10{anyGrat ? ', "strong markets" 9 in 10' : ""}. What the kids receive counts gifts grown to
+          age {results[0].sim.estate.age} at your portfolio's return, plus the inheritance after estate tax and an
+          assumed {Math.round(household.assumptions.heirIncomeTaxRate * 100)}% income tax on inherited retirement
+          accounts.
         </p>
       </Card>
 

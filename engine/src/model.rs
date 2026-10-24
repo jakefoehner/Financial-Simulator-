@@ -156,6 +156,10 @@ pub struct HouseholdInfo {
     pub filing_status: FilingStatus,
     /// Yearly living expenses in today's dollars (grows with inflation).
     pub base_annual_spending: f64,
+    /// Yearly property tax on your home(s), in today's dollars. Already part of your spending;
+    /// used only for itemized deductions (state and local taxes).
+    #[serde(default)]
+    pub home_property_tax: f64,
 }
 
 impl Default for HouseholdInfo {
@@ -166,6 +170,7 @@ impl Default for HouseholdInfo {
             flat_state_rate: 0.0,
             filing_status: FilingStatus::Single,
             base_annual_spending: 0.0,
+            home_property_tax: 0.0,
         }
     }
 }
@@ -367,6 +372,9 @@ pub struct Debt {
     /// Property/asset this debt is secured by, if any.
     pub account_id: Option<Id>,
     pub notes: String,
+    /// The mortgage on your own home: its interest can be itemized (up to $750k of debt).
+    #[serde(default)]
+    pub home_mortgage: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -462,6 +470,58 @@ pub enum Event {
         from_age: u32,
         to_age: u32,
     },
+    /// Give to charity (or a donor-advised fund) each year for `years` years: cash, or
+    /// appreciated investments from `account_id` (no capital-gains tax; deductible at market value).
+    CharityGift {
+        amount: f64,
+        from_age: u32,
+        years: u32,
+        account_id: Option<Id>,
+        donor_advised: bool,
+    },
+    /// Leave `share` (0–1) of the estate to charity, taking traditional IRA money first
+    /// when `from_ira_first` (charities owe no income tax on it).
+    CharitableBequest {
+        share: f64,
+        from_ira_first: bool,
+    },
+    /// Put money into a 529 for a child. `superfund` spreads it over five years of the
+    /// yearly gift exclusion (up to 5×).
+    Fund529 {
+        to: Id,
+        age: u32,
+        amount: f64,
+        superfund: bool,
+    },
+    /// Pay a child's tuition or medical bills directly: not a gift at all, with no limit.
+    PayTuitionMedical {
+        to: Id,
+        amount: f64,
+        from_age: u32,
+        years: u32,
+    },
+    /// Move `amount` from `account_id` into a family LLC, then give each child `gift_share`
+    /// of the LLC each year for `years` years, valued with a `discount` (lack of control
+    /// and marketability).
+    FamilyLlc {
+        account_id: Id,
+        age: u32,
+        amount: f64,
+        discount: f64,
+        gift_share: f64,
+        years: u32,
+    },
+    /// Grantor retained annuity trusts: put `amount` from `account_id` into a 2-year GRAT
+    /// that pays you back with the IRS §7520 rate; growth above it goes to the kids.
+    /// When `rolling`, each payment back starts a new GRAT through `until_age`.
+    Grat {
+        account_id: Id,
+        age: u32,
+        amount: f64,
+        term_years: u32,
+        rolling: bool,
+        until_age: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -497,7 +557,8 @@ impl HouseholdInfo {
     pub fn validate(&self) -> Validation {
         non_empty("Household name", &self.name)?;
         in_range("State tax rate", self.flat_state_rate, 0.0, 0.2)?;
-        non_negative("Yearly spending", self.base_annual_spending)
+        non_negative("Yearly spending", self.base_annual_spending)?;
+        non_negative("Home property tax", self.home_property_tax)
     }
 }
 
@@ -618,6 +679,13 @@ impl Event {
             }
         };
         let age = |a: u32| in_range("Age", a, 18, 120);
+        let giftable = |id: Id| -> Validation {
+            if accounts.iter().any(|x| x.id == Some(id) && x.account_type.giftable_in_kind()) {
+                Ok(())
+            } else {
+                Err("Pick a brokerage or stock account.".into())
+            }
+        };
         match self {
             Event::HomeHelp { to, age: a, gift, loan } => {
                 child(*to)?;
@@ -668,13 +736,60 @@ impl Event {
                 }
                 Ok(())
             }
+            Event::CharityGift { amount, from_age, years, account_id, .. } => {
+                if let Some(id) = account_id {
+                    giftable(*id)?;
+                }
+                non_negative("Gift", *amount)?;
+                age(*from_age)?;
+                in_range("Number of years", *years, 1, 60)
+            }
+            Event::CharitableBequest { share, .. } => in_range("Share of the estate", *share, 0.0, 1.0),
+            Event::Fund529 { to, age: a, amount, .. } => {
+                child(*to)?;
+                age(*a)?;
+                non_negative("Amount", *amount)
+            }
+            Event::PayTuitionMedical { to, amount, from_age, years } => {
+                child(*to)?;
+                non_negative("Amount", *amount)?;
+                age(*from_age)?;
+                in_range("Number of years", *years, 1, 60)
+            }
+            Event::FamilyLlc { account_id, age: a, amount, discount, gift_share, years } => {
+                if !people.iter().any(|p| p.role == Role::Child) {
+                    return Err("Add your children on the People page first.".into());
+                }
+                giftable(*account_id)?;
+                age(*a)?;
+                non_negative("Amount", *amount)?;
+                in_range("Valuation discount", *discount, 0.0, 0.6)?;
+                in_range("Share given each year", *gift_share, 0.0, 1.0)?;
+                in_range("Number of years", *years, 1, 60)
+            }
+            Event::Grat { account_id, age: a, amount, term_years, until_age, .. } => {
+                if !people.iter().any(|p| p.role == Role::Child) {
+                    return Err("Add your children on the People page first.".into());
+                }
+                giftable(*account_id)?;
+                age(*a)?;
+                non_negative("Amount", *amount)?;
+                in_range("GRAT length (years)", *term_years, 2, 20)?;
+                if until_age < a {
+                    return Err("Keep rolling until an age on or after the first GRAT.".into());
+                }
+                Ok(())
+            }
         }
     }
 
     /// The child this event is for, if any.
     pub fn recipient(&self) -> Option<Id> {
         match self {
-            Event::HomeHelp { to, .. } | Event::FamilyLoan { to, .. } => Some(*to),
+            Event::HomeHelp { to, .. }
+            | Event::FamilyLoan { to, .. }
+            | Event::Fund529 { to, .. }
+            | Event::PayTuitionMedical { to, .. } => Some(*to),
             Event::CashGift { to, .. } | Event::GiftAssets { to, .. } => *to,
             _ => None,
         }
@@ -805,6 +920,7 @@ mod tests {
             monthly_payment: 150.0,
             account_id: None,
             notes: String::new(),
+            home_mortgage: false,
         };
         assert!(d.validate().is_ok());
         assert!(d.is_negatively_amortizing());

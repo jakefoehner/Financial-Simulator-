@@ -5,15 +5,18 @@
 //! 2. Make contributions (while the owner is still earning) and take RMDs.
 //! 3. Pay spending, one-time expenses, and debt payments.
 //!    Scenario decisions happen here too: gifts, family loans (money out, then
-//!    repayments in), Roth conversions, spending changes.
+//!    repayments in), Roth conversions, spending changes, charity, 529s and
+//!    tuition, a family LLC (yearly discounted gifts) and GRATs (annuity back,
+//!    growth to the kids).
 //! 4. Cover any shortfall by withdrawing cash → taxable → traditional → Roth/HSA,
 //!    re-solving taxes until they converge (withdrawals create tax, which
 //!    needs more withdrawals). Surpluses are saved to the brokerage account.
 //! 5. Grow every account by its expected return.
 //!
 //! Simplifications (planning-grade): yearly steps, withdrawals at the start of
-//! the year, all gains long-term, standard deduction only, no Roth/HSA
-//! withdrawal restrictions, 529s and real estate are never sold.
+//! the year, all gains long-term, no Roth/HSA withdrawal restrictions, 529s and
+//! real estate are never sold. Itemized deductions are taken when larger than
+//! the standard deduction; charity above the AGI limits carries forward 5 years.
 
 // Sums use `fold(0.0, f64::add)` because `Iterator::sum` of an empty f64
 // iterator is -0.0, which the UI would show as "-$0".
@@ -41,6 +44,10 @@ pub enum Bucket {
     Education,
     /// Private funds and startups: illiquid until they pay out.
     Private,
+    /// Your share of a family LLC set up in a plan (not spendable; gifted to the kids over time).
+    FamilyLlc,
+    /// Assets in a GRAT during its term (still yours for estate purposes; not spendable).
+    Grat,
 }
 
 impl Bucket {
@@ -59,7 +66,7 @@ impl Bucket {
 
     /// Can be spent from to cover living expenses.
     fn spendable(self) -> bool {
-        !matches!(self, Bucket::RealEstate | Bucket::Education | Bucket::Private)
+        !matches!(self, Bucket::RealEstate | Bucket::Education | Bucket::Private | Bucket::FamilyLlc | Bucket::Grat)
     }
 }
 
@@ -76,6 +83,10 @@ pub struct Balances {
     pub loans_receivable: f64,
     /// Private funds and startups (counted in net worth, not spendable until they pay out).
     pub private: f64,
+    /// Your remaining share of a family LLC.
+    pub family_llc: f64,
+    /// Assets inside GRATs that haven't finished their term.
+    pub grats: f64,
 }
 
 impl Balances {
@@ -85,7 +96,13 @@ impl Balances {
     }
 
     pub fn total(&self) -> f64 {
-        self.investable() + self.real_estate + self.education + self.loans_receivable + self.private
+        self.investable()
+            + self.real_estate
+            + self.education
+            + self.loans_receivable
+            + self.private
+            + self.family_llc
+            + self.grats
     }
 }
 
@@ -134,6 +151,23 @@ pub struct YearResult {
     pub private_proceeds: f64,
     /// Gifts locked in under the exemption so far (the anti-clawback amount).
     pub sheltered_gifts: f64,
+    /// Given to charity or a donor-advised fund this year (cash plus investments at market value).
+    pub charity: f64,
+    /// The cash part of `charity`.
+    pub charity_cash: f64,
+    /// Charity above the AGI limits, carried forward to later years.
+    pub charity_carryforward: f64,
+    /// Put into 529s and paid directly for tuition or medical bills.
+    pub education: f64,
+    /// 529 superfunding not yet counted against the yearly exclusions (pulled back into the
+    /// estate if you die within the five years).
+    pub superfund_pending: f64,
+    /// Family LLC shares given to the kids this year (full value; the gift is reported at a discount).
+    pub llc_gifts: f64,
+    /// How much lower your remaining LLC share is valued for estate tax (once you no longer control it).
+    pub llc_discount: f64,
+    /// What finished GRATs passed to the kids this year.
+    pub grat_remainders: f64,
     pub tax: TaxResult,
     // End of year
     pub balances: Balances,
@@ -150,6 +184,8 @@ pub struct ChildAmount {
     pub amount: f64,
     /// Cost basis the child receives (equal to `amount` for cash; your basis for gifted investments).
     pub basis: f64,
+    /// Part of `amount` that grows tax-free for the child (529s).
+    pub tax_free: f64,
 }
 
 impl YearResult {
@@ -223,6 +259,31 @@ struct Acct {
     contribution: f64,
     employer_match: f64,
     private: Option<PrivateState>,
+    llc: Option<LlcState>,
+    grat: Option<GratState>,
+}
+
+/// A family LLC: this account holds your share of it.
+#[derive(Debug, Clone)]
+struct LlcState {
+    /// Index of the event that created it.
+    event: usize,
+    /// Your share of the LLC (1.0 at the start).
+    share: f64,
+    discount: f64,
+}
+
+/// One GRAT during its term.
+#[derive(Debug, Clone)]
+struct GratState {
+    event: usize,
+    /// Fixed yearly payment back to you.
+    annuity: f64,
+    years_left: u32,
+    /// Account the payments go back to when not rolled into a new GRAT.
+    home: usize,
+    /// Keep rolling payments into new GRATs through this age.
+    roll_until: Option<u32>,
 }
 
 /// Running state of one private investment.
@@ -260,7 +321,36 @@ impl Acct {
                 startup_multiplier: 1.0,
                 exited: false,
             }),
+            llc: None,
+            grat: None,
         }
+    }
+
+    /// A new holding of `amount` (with `basis`) invested like `self`, in `bucket`.
+    fn carve(&self, bucket: Bucket, amount: f64, basis: f64) -> Acct {
+        Acct {
+            bucket,
+            balance: amount,
+            basis,
+            contribution: 0.0,
+            employer_match: 0.0,
+            private: None,
+            llc: None,
+            grat: None,
+            ..self.clone()
+        }
+    }
+
+    /// Takes up to `amount` out of this account in kind; returns (value, cost basis) taken.
+    fn take_in_kind(&mut self, amount: f64) -> (f64, f64) {
+        let take = amount.min(self.balance.max(0.0));
+        if take <= 0.0 {
+            return (0.0, 0.0);
+        }
+        let basis = take * (self.basis / self.balance).clamp(0.0, 1.0);
+        self.balance -= take;
+        self.basis -= basis;
+        (take, basis)
     }
 
     fn total_return(&self, m: &MarketYear) -> f64 {
@@ -280,7 +370,8 @@ impl Acct {
     fn yield_income(&self, r: &Assumptions, m: &MarketYear) -> (f64, f64) {
         match self.bucket {
             Bucket::Cash => (0.0, self.balance * m.cash.max(0.0)),
-            Bucket::Taxable => {
+            // A family LLC and a GRAT are taxed to you (a grantor trust): their income is yours.
+            Bucket::Taxable | Bucket::FamilyLlc | Bucket::Grat => {
                 let pays_dividends = !matches!(self.account_type, AccountType::Crypto | AccountType::LlcInterest);
                 let qualified = if pays_dividends { self.balance * self.stocks * r.stock_dividend_yield } else { 0.0 };
                 let interest = self.balance * (self.bonds * r.bonds_return + self.cash * m.cash.max(0.0));
@@ -472,6 +563,34 @@ impl Loan {
     }
 }
 
+/// A new GRAT of `amount` funded from `src`, paying back a level annuity whose present value
+/// at the §7520 rate equals what went in (a "zeroed-out" GRAT: the gift is about $0).
+#[allow(clippy::too_many_arguments)]
+fn new_grat(
+    src: &Acct,
+    amount: f64,
+    basis: f64,
+    term: u32,
+    rate: f64,
+    event: usize,
+    home: usize,
+    roll_until: Option<u32>,
+) -> Acct {
+    let n = term.max(1) as i32;
+    let annuity = if rate == 0.0 { amount / n as f64 } else { amount * rate / (1.0 - (1.0 + rate).powi(-n)) };
+    let mut g = src.carve(Bucket::Grat, amount, basis);
+    g.grat = Some(GratState { event, annuity, years_left: term.max(1), home, roll_until });
+    g
+}
+
+/// The plan's charitable bequest, if any: (share of the estate, IRA money first).
+fn charitable_bequest(events: &[Event]) -> Option<(f64, bool)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::CharitableBequest { share, from_ira_first } => Some((*share, *from_ira_first)),
+        _ => None,
+    })
+}
+
 /// Runs the projection with `market(n)` supplying year `n`'s returns and inflation
 /// (n = 0 is `start_year`) and `events` applying the scenario's decisions.
 pub fn project_market(
@@ -522,6 +641,8 @@ pub fn project_market(
             contribution: 0.0,
             employer_match: 0.0,
             private: None,
+            llc: None,
+            grat: None,
         });
     }
     let savings_target = accts
@@ -530,8 +651,8 @@ pub fn project_market(
         .or_else(|| accts.iter().position(|a| a.bucket == Bucket::Cash))
         .unwrap();
 
-    let mut debts: Vec<(f64, f64, f64)> =
-        h.debts.iter().map(|d| (d.balance, d.interest_rate, d.monthly_payment * 12.0)).collect();
+    let mut debts: Vec<(f64, f64, f64, bool)> =
+        h.debts.iter().map(|d| (d.balance, d.interest_rate, d.monthly_payment * 12.0, d.home_mortgage)).collect();
 
     let starting_investable: f64 = accts.iter().filter(|a| a.bucket.spendable()).map(|a| a.balance).fold(0.0, f64::add);
     let mut years = Vec::new();
@@ -544,6 +665,11 @@ pub fn project_market(
     let mut sheltered_gifts: f64 = 0.0;
     let mut roth_target =
         accts.iter().position(|a| matches!(a.account_type, AccountType::RothIra | AccountType::Roth401k));
+    // Charity above the AGI limits: (year given, cash, investments), usable for 5 more years.
+    let mut charity_carry: Vec<(i32, f64, f64)> = Vec::new();
+    // 529 superfunding still to be spread: (child, per year, years left).
+    let mut superfunds: Vec<(Id, f64, u32)> = Vec::new();
+    let section_7520 = t.afr.section_7520;
 
     for year in start_year..=end_year {
         let n = year - start_year;
@@ -724,19 +850,35 @@ pub fn project_market(
         let one_time: f64 =
             h.one_time_expenses.iter().filter(|x| x.year == year).map(|x| x.amount * price).fold(0.0, f64::add);
         let mut debt_payments = 0.0;
-        for (balance, rate, payment) in debts.iter_mut() {
+        let mut mortgage_interest = 0.0;
+        for (balance, rate, payment, home) in debts.iter_mut() {
             if *balance <= 0.0 {
                 continue;
             }
             let interest_due = *balance * *rate;
+            if *home {
+                // Interest on up to $750k of home debt is deductible.
+                mortgage_interest += interest_due * (t.itemized.mortgage_debt_limit / *balance).min(1.0);
+            }
             let pay = payment.min(*balance + interest_due);
             *balance = (*balance + interest_due - pay).max(0.0);
             debt_payments += pay;
         }
 
         // --- Scenario decisions: loans, gifts, Roth conversions ---
+        // What each child receives (value, basis, tax-free part), and separately what's reported
+        // as a gift: tuition and medical payments aren't gifts, 529 superfunding is spread over
+        // five years, LLC shares are valued at a discount, and a GRAT's remainder was already
+        // valued (at about zero) when the GRAT was set up.
         let mut gifts_by_child: Vec<ChildAmount> = Vec::new();
-        let mut give = |to: Id, amount: f64, basis: f64| {
+        let mut reported: Vec<(Id, f64)> = Vec::new();
+        let mut give = |to: Id, amount: f64, basis: f64, report: f64, tax_free: f64| {
+            if report > 0.0 {
+                match reported.iter_mut().find(|r| r.0 == to) {
+                    Some(r) => r.1 += report,
+                    None => reported.push((to, report)),
+                }
+            }
             if amount <= 0.0 {
                 return;
             }
@@ -744,8 +886,9 @@ pub fn project_market(
                 Some(g) => {
                     g.amount += amount;
                     g.basis += basis;
+                    g.tax_free += tax_free;
                 }
-                None => gifts_by_child.push(ChildAmount { child_id: to, amount, basis }),
+                None => gifts_by_child.push(ChildAmount { child_id: to, amount, basis, tax_free }),
             }
         };
         let (mut loan_interest, mut loan_principal) = (0.0, 0.0);
@@ -753,7 +896,51 @@ pub fn project_market(
             let (i, p, forgiven) = loan.year();
             loan_interest += i;
             loan_principal += p;
-            give(loan.to, forgiven, forgiven);
+            give(loan.to, forgiven, forgiven, forgiven, 0.0);
+        }
+        for (to, per_year, left) in superfunds.iter_mut() {
+            give(*to, 0.0, 0.0, *per_year, 0.0);
+            *left -= 1;
+        }
+        superfunds.retain(|s| s.2 > 0);
+
+        // GRATs pay their annuity at each anniversary (the start of the year here); a finished
+        // GRAT's remainder goes to the kids. Payments roll into a new GRAT or come back to you.
+        let mut grat_remainders = 0.0;
+        // Payments rolling into a new GRAT, per event: (event, invested like acct, home acct, amount, basis).
+        let mut rolls: Vec<(usize, usize, usize, f64, f64)> = Vec::new();
+        for k in 0..accts.len() {
+            let Some(mut g) = accts[k].grat.clone() else { continue };
+            let (pay, pay_basis) = accts[k].take_in_kind(g.annuity);
+            g.years_left -= 1;
+            if g.years_left == 0 {
+                let (rest, rest_basis) = accts[k].take_in_kind(f64::INFINITY);
+                grat_remainders += rest;
+                let n = children.len().max(1) as f64;
+                for &id in &children {
+                    give(id, rest / n, rest_basis / n, 0.0, 0.0);
+                }
+                accts[k].grat = None;
+            } else {
+                accts[k].grat = Some(g.clone());
+            }
+            if g.roll_until.is_some_and(|until| primary_age <= until) {
+                match rolls.iter_mut().find(|r| r.0 == g.event) {
+                    Some(r) => {
+                        r.3 += pay;
+                        r.4 += pay_basis;
+                    }
+                    None => rolls.push((g.event, k, g.home, pay, pay_basis)),
+                }
+            } else {
+                accts[g.home].balance += pay;
+                accts[g.home].basis += pay_basis;
+            }
+        }
+        for (event, from, home, amount, basis) in rolls {
+            let Some(Event::Grat { term_years, until_age, .. }) = events.get(event) else { continue };
+            let new = new_grat(&accts[from], amount, basis, *term_years, section_7520, event, home, Some(*until_age));
+            accts.push(new);
         }
         loans.retain(|l| l.balance > 0.005 && l.years_left > 0);
         interest += loan_interest;
@@ -761,11 +948,14 @@ pub fn project_market(
         let exclusion = t.annual_exclusion(index);
         let (mut cash_gifts, mut loans_made) = (0.0, 0.0);
         let mut roth_conversion_wanted = 0.0;
-        for e in events {
+        let (mut charity_cash, mut charity_property, mut charity_cash_public) = (0.0, 0.0, 0.0);
+        let (mut education, mut llc_gifts) = (0.0, 0.0);
+        let in_years = |from: u32, years: u32| primary_age >= from && primary_age < from + years;
+        for (ei, e) in events.iter().enumerate() {
             match e {
                 Event::HomeHelp { to, age, gift, loan } if *age == primary_age => {
                     cash_gifts += gift * price;
-                    give(*to, gift * price, gift * price);
+                    give(*to, gift * price, gift * price, gift * price, 0.0);
                     if let Some(terms) = loan {
                         let l = Loan::new(*to, terms, price);
                         loans_made += l.balance;
@@ -787,7 +977,7 @@ pub fn project_market(
                     };
                     for id in recipients {
                         cash_gifts += each;
-                        give(id, each, each);
+                        give(id, each, each, each, 0.0);
                     }
                 }
                 Event::GiftAssets { to, account_id, age, amount } if *age == primary_age => {
@@ -797,16 +987,9 @@ pub fn project_market(
                     };
                     if let Some(k) = h.accounts.iter().position(|a| a.id == Some(*account_id)) {
                         for id in recipients {
-                            let a = &mut accts[k];
-                            let take = (amount * price).min(a.balance.max(0.0));
-                            if take <= 0.0 {
-                                continue;
-                            }
                             // The child takes your cost basis on what they receive.
-                            let carried = take * (a.basis / a.balance).clamp(0.0, 1.0);
-                            a.balance -= take;
-                            a.basis -= carried;
-                            give(id, take, carried);
+                            let (take, carried) = accts[k].take_in_kind(amount * price);
+                            give(id, take, carried, take, 0.0);
                         }
                     }
                 }
@@ -814,6 +997,74 @@ pub fn project_market(
                     if primary_age >= *from_age && primary_age <= *to_age =>
                 {
                     roth_conversion_wanted += per_year * price;
+                }
+                Event::CharityGift { amount, from_age, years, account_id, donor_advised }
+                    if in_years(*from_age, *years) =>
+                {
+                    match account_id.and_then(|id| h.accounts.iter().position(|a| a.id == Some(id))) {
+                        // Appreciated investments: no capital-gains tax, deductible at market value.
+                        Some(k) => charity_property += accts[k].take_in_kind(amount * price).0,
+                        None => {
+                            charity_cash += amount * price;
+                            if !donor_advised {
+                                charity_cash_public += amount * price;
+                            }
+                        }
+                    }
+                }
+                Event::Fund529 { to, age, amount, superfund } if *age == primary_age => {
+                    let v = amount * price;
+                    education += v;
+                    // Superfunding: up to 5 years of exclusions, counted one-fifth a year.
+                    let spread = if *superfund { v.min(5.0 * exclusion) } else { 0.0 };
+                    give(*to, v, v, v - spread + spread / 5.0, v);
+                    if spread > 0.0 {
+                        superfunds.push((*to, spread / 5.0, 4));
+                    }
+                }
+                Event::PayTuitionMedical { to, amount, from_age, years } if in_years(*from_age, *years) => {
+                    let v = amount * price;
+                    education += v;
+                    give(*to, v, v, 0.0, 0.0);
+                }
+                Event::FamilyLlc { account_id, age, amount, discount, gift_share, years } => {
+                    if *age == primary_age
+                        && let Some(k) = h.accounts.iter().position(|a| a.id == Some(*account_id))
+                    {
+                        let (v, basis) = accts[k].take_in_kind(amount * price);
+                        let mut llc = accts[k].carve(Bucket::FamilyLlc, v, basis);
+                        llc.account_type = AccountType::LlcInterest;
+                        llc.llc = Some(LlcState { event: ei, share: 1.0, discount: *discount });
+                        accts.push(llc);
+                    }
+                    if in_years(*age, *years)
+                        && let Some(a) = accts.iter_mut().find(|a| a.llc.as_ref().is_some_and(|l| l.event == ei))
+                        && let Some(l) = a.llc.as_mut()
+                    {
+                        // The last gift takes whatever share is left (no floating-point crumbs).
+                        let part = if *gift_share >= l.share - 1e-9 { l.share } else { *gift_share };
+                        if part > 0.0 && l.share > 0.0 {
+                            // The kids receive the full value; the gift is reported at a discount.
+                            let value = a.balance.max(0.0) * part / l.share;
+                            let discount = l.discount;
+                            l.share -= part;
+                            let (v, basis) = a.take_in_kind(value);
+                            llc_gifts += v;
+                            let n = children.len().max(1) as f64;
+                            for &id in &children {
+                                give(id, v / n, basis / n, v * (1.0 - discount) / n, 0.0);
+                            }
+                        }
+                    }
+                }
+                Event::Grat { account_id, age, amount, term_years, rolling, until_age } if *age == primary_age => {
+                    if let Some(k) = h.accounts.iter().position(|a| a.id == Some(*account_id)) {
+                        let (v, basis) = accts[k].take_in_kind(amount * price);
+                        if v > 0.0 {
+                            let roll = rolling.then_some(*until_age);
+                            accts.push(new_grat(&accts[k], v, basis, *term_years, section_7520, ei, k, roll));
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -844,6 +1095,8 @@ pub fn project_market(
                             contribution: 0.0,
                             employer_match: 0.0,
                             private: None,
+                            llc: None,
+                            grat: None,
                         });
                         roth_target = Some(accts.len() - 1);
                         accts.len() - 1
@@ -853,9 +1106,9 @@ pub fn project_market(
             }
         }
 
-        // Gift ledger: amounts above each child's yearly exclusion use up the lifetime exemption.
+        // Gift ledger: reported gifts above each child's yearly exclusion use up the lifetime exemption.
         let gifts: f64 = gifts_by_child.iter().map(|g| g.amount).fold(0.0, f64::add);
-        lifetime_taxable_gifts += gifts_by_child.iter().map(|g| (g.amount - exclusion).max(0.0)).fold(0.0, f64::add);
+        lifetime_taxable_gifts += reported.iter().map(|r| (r.1 - exclusion).max(0.0)).fold(0.0, f64::add);
         // Gift tax is due only above the exemption, never less than what's already sheltered.
         let shelter = t.estate_exemption(year, index, &r).max(sheltered_gifts);
         let gift_tax = (t.estate_gift.top_rate * (lifetime_taxable_gifts - shelter).max(0.0) - gift_tax_paid).max(0.0);
@@ -877,7 +1130,18 @@ pub fn project_market(
             + loan_interest
             + loan_principal
             + private_income;
-        let base_out = spending + one_time + debt_payments + contributions + cash_gifts + loans_made + gift_tax;
+        let base_out = spending
+            + one_time
+            + debt_payments
+            + contributions
+            + cash_gifts
+            + loans_made
+            + gift_tax
+            + charity_cash
+            + education;
+        let (carry_cash, carry_property) =
+            charity_carry.iter().fold((0.0, 0.0), |(c, p), entry| (c + entry.1, p + entry.2));
+        let property_tax = h.info.home_property_tax * price;
 
         let tax_rise = r.tax_rise_enabled && year >= r.tax_rise_year;
         let tax_for = |d: &Draw| {
@@ -904,6 +1168,11 @@ pub fn project_market(
                     filers_65_plus,
                     children_under_17,
                     state_rate: h.info.flat_state_rate,
+                    property_tax,
+                    mortgage_interest,
+                    charity_cash: charity_cash + carry_cash,
+                    charity_property: charity_property + carry_property,
+                    charity_cash_public,
                 },
             )
         };
@@ -942,6 +1211,24 @@ pub fn project_market(
         }
         magi_history.push(tax_result.agi);
 
+        // Charity carryforward: this year's gifts are used first, then the oldest carried amounts.
+        let mut cash_used = tax_result.charity_cash_absorbed;
+        let mut property_used = tax_result.charity_property_absorbed;
+        let new_carry = ((charity_cash - cash_used).max(0.0), (charity_property - property_used).max(0.0));
+        cash_used = (cash_used - charity_cash).max(0.0);
+        property_used = (property_used - charity_property).max(0.0);
+        for c in charity_carry.iter_mut() {
+            let (uc, up) = (c.1.min(cash_used), c.2.min(property_used));
+            c.1 -= uc;
+            c.2 -= up;
+            cash_used -= uc;
+            property_used -= up;
+        }
+        charity_carry.retain(|c| c.1 + c.2 > 0.005 && year - c.0 < 5);
+        if new_carry.0 + new_carry.1 > 0.005 {
+            charity_carry.push((year, new_carry.0, new_carry.1));
+        }
+
         // --- 5. Growth ---
         // The spendable portfolio's blended return this year; gifts are grown at it in the
         // estate so money given early is compared fairly with money kept.
@@ -967,11 +1254,19 @@ pub fn project_market(
                 Bucket::RealEstate => &mut balances.real_estate,
                 Bucket::Education => &mut balances.education,
                 Bucket::Private => &mut balances.private,
+                Bucket::FamilyLlc => &mut balances.family_llc,
+                Bucket::Grat => &mut balances.grats,
             };
             *slot += a.balance;
         }
         balances.loans_receivable = loans.iter().map(|l| l.balance).fold(0.0, f64::add);
         let debt_balance: f64 = debts.iter().map(|d| d.0).fold(0.0, f64::add);
+        // Once you hold half or less of the LLC you no longer control it, so your share is
+        // valued at the discount for estate tax.
+        let llc_discount = accts
+            .iter()
+            .filter_map(|a| a.llc.as_ref().filter(|l| l.share <= 0.5 + 1e-9).map(|l| l.discount * a.balance.max(0.0)))
+            .fold(0.0, f64::add);
 
         years.push(YearResult {
             year,
@@ -1002,6 +1297,14 @@ pub fn project_market(
             private_income,
             private_proceeds,
             sheltered_gifts,
+            charity: charity_cash + charity_property,
+            charity_cash,
+            charity_carryforward: charity_carry.iter().map(|c| c.1 + c.2).fold(0.0, f64::add),
+            education,
+            superfund_pending: superfunds.iter().map(|s| s.1 * s.2 as f64).fold(0.0, f64::add),
+            llc_gifts,
+            llc_discount,
+            grat_remainders,
             tax: tax_result,
             net_worth: balances.total() - debt_balance,
             balances,
@@ -1023,7 +1326,7 @@ pub fn project_market(
         principal_dips_at_age: years.iter().find(|y| y.investable_real() < starting_investable * 0.999).map(|y| y.age),
         ending_net_worth_real: last.net_worth_real(),
         ending_investable_real: last.investable_real(),
-        estate: estate::estate_at(h, &years, start_year, t),
+        estate: estate::estate_at(h, &years, start_year, t, charitable_bequest(events)),
     };
     Ok(Projection { summary, years })
 }
@@ -1286,6 +1589,7 @@ mod tests {
             monthly_payment: 500.0,
             account_id: None,
             notes: String::new(),
+            home_mortgage: false,
         });
         let p = project(&h, None, 2026).unwrap();
         assert_eq!(p.years[0].debt_payments, 6_000.0);
@@ -1539,6 +1843,198 @@ mod tests {
         let after_cut = p.years.iter().find(|y| y.year == 2031).unwrap();
         close(after_cut.sheltered_gifts, 9_962_000.0, 1.0);
         assert!(p.summary.estate.anti_clawback_applies);
+    }
+
+    #[test]
+    fn cash_to_charity_is_itemized_and_the_excess_carries_forward_five_years() {
+        let base = run(vec![]);
+        let p = run(vec![Event::CharityGift {
+            amount: 1_000_000.0,
+            from_age: 58,
+            years: 1,
+            account_id: None,
+            donor_advised: true,
+        }]);
+        let y0 = &p.years[0];
+        close(y0.charity, 1_000_000.0, 0.01);
+        assert!(y0.tax.itemized);
+        // Only 60% of AGI is deductible this year; the rest carries forward.
+        close(y0.tax.charity_cash_absorbed, 0.6 * y0.tax.agi, 0.01);
+        close(y0.charity_carryforward, 1_000_000.0 - y0.tax.charity_cash_absorbed, 0.01);
+        assert!(y0.taxes < base.years[0].taxes);
+        assert!(p.years[1].tax.itemized, "the carryforward is deducted the next year too");
+        // A carryforward can be used in the five following years (through 2031), then whatever is left expires.
+        assert!(p.years[4].charity_carryforward > 0.0);
+        assert!(p.years[5].tax.itemized);
+        assert_eq!(p.years[5].charity_carryforward, 0.0);
+        assert!(!p.years[6].tax.itemized);
+    }
+
+    #[test]
+    fn giving_appreciated_stock_to_charity_realizes_no_gain() {
+        let mut h = family(vec![Event::CharityGift {
+            amount: 100_000.0,
+            from_age: 58,
+            years: 1,
+            account_id: Some(1),
+            donor_advised: false,
+        }]);
+        h.accounts[0].id = Some(1);
+        h.accounts[0].cost_basis = Some(500_000.0);
+        let p = project(&h, Some(1), 2026).unwrap();
+        let base = project(&h, None, 2026).unwrap();
+        let y0 = &p.years[0];
+        close(y0.charity, 100_000.0, 0.01);
+        close(y0.tax.charity_property_absorbed, 100_000f64.min(0.3 * y0.tax.agi), 0.01);
+        // No sale, so no extra gains (income is even a bit lower: less tax means less to sell
+        // to pay it), and the deduction lowers the tax.
+        assert!(y0.tax.agi <= base.years[0].tax.agi);
+        assert!(y0.taxes < base.years[0].taxes);
+        assert_eq!(y0.cash_gifts, 0.0);
+    }
+
+    #[test]
+    fn superfunding_a_529_spreads_the_gift_over_five_years() {
+        let superfund = run(vec![Event::Fund529 { to: 2, age: 58, amount: 95_000.0, superfund: true }]);
+        let lump = run(vec![Event::Fund529 { to: 2, age: 58, amount: 95_000.0, superfund: false }]);
+        // 95,000 / 5 = 19,000 a year: exactly the exclusion, so no exemption is used.
+        assert!(superfund.years.iter().take(5).all(|y| y.lifetime_taxable_gifts == 0.0));
+        close(superfund.years[0].superfund_pending, 76_000.0, 0.01);
+        assert_eq!(superfund.years[4].superfund_pending, 0.0);
+        close(lump.years[0].lifetime_taxable_gifts, 76_000.0, 0.01);
+        let g = &superfund.years[0].gifts_by_child[0];
+        close(g.tax_free, 95_000.0, 0.01);
+        close(superfund.years[0].education, 95_000.0, 0.01);
+        // The 529 grows tax-free for the child.
+        let sam = &superfund.summary.estate.children[0];
+        assert!(sam.gifts_grown_real > 95_000.0);
+        assert_eq!(sam.gifts_capital_gains_tax_real, 0.0);
+    }
+
+    #[test]
+    fn paying_tuition_directly_is_not_a_gift() {
+        let p = run(vec![Event::PayTuitionMedical { to: 2, amount: 100_000.0, from_age: 58, years: 2 }]);
+        assert!(p.years.iter().all(|y| y.lifetime_taxable_gifts == 0.0));
+        close(p.years[0].education, 100_000.0, 0.01);
+        close(p.years[1].education, 102_500.0, 0.01);
+        let e = &p.summary.estate;
+        // $100k a year in today's dollars, for two years.
+        close(e.children[0].gifts_real, 200_000.0, 0.01);
+        assert_eq!(e.children[1].gifts_real, 0.0);
+    }
+
+    #[test]
+    fn family_llc_gifts_are_reported_at_a_discount() {
+        let mut h = family(vec![Event::FamilyLlc {
+            account_id: 1,
+            age: 58,
+            amount: 2_000_000.0,
+            discount: 0.3,
+            gift_share: 0.1,
+            years: 10,
+        }]);
+        h.accounts[0].id = Some(1);
+        let p = project(&h, Some(1), 2026).unwrap();
+        let y0 = &p.years[0];
+        // 10% of the $2M LLC goes to the kids; reported at 70%: 70k each, 51k above the exclusion.
+        close(y0.llc_gifts, 200_000.0, 0.01);
+        close(y0.lifetime_taxable_gifts, 2.0 * (70_000.0 - 19_000.0), 0.01);
+        assert!(y0.balances.family_llc > 1_800_000.0, "your 90% share, grown");
+        // After the fifth gift you hold half and lose control: your share gets the discount too.
+        assert_eq!(p.years[3].llc_discount, 0.0);
+        close(p.years[4].llc_discount, 0.3 * p.years[4].balances.family_llc, 0.01);
+        assert!(p.years[10].balances.family_llc == 0.0, "all given away after ten years");
+        // LLC income is still taxed to you.
+        assert!(p.years[1].balances.family_llc > 0.0);
+    }
+
+    #[test]
+    fn a_grat_pays_you_back_and_passes_growth_above_the_7520_rate() {
+        let mut h = family(vec![Event::Grat {
+            account_id: 1,
+            age: 58,
+            amount: 1_000_000.0,
+            term_years: 2,
+            rolling: false,
+            until_age: 58,
+        }]);
+        h.accounts[0].id = Some(1);
+        h.accounts[0].stocks_pct = 1.0;
+        h.accounts[0].bonds_pct = 0.0;
+        let p = project(&h, Some(1), 2026).unwrap();
+        let r = TaxTables::current().afr.section_7520;
+        let annuity = 1_000_000.0 * r / (1.0 - (1.0 + r).powi(-2));
+        let g = h.assumptions.stocks_return;
+        let remainder = (1_000_000.0 * (1.0 + g) - annuity) * (1.0 + g) - annuity;
+        assert!(remainder > 0.0 && remainder < 50_000.0, "7% vs 6.2%: a thin margin ({remainder})");
+        close(p.years[2].grat_remainders, remainder, 0.01);
+        close(p.years[2].gifts, remainder, 0.01);
+        assert!(p.years.iter().all(|y| y.lifetime_taxable_gifts == 0.0), "a zeroed-out GRAT uses no exemption");
+        assert!(p.years[0].balances.grats > 0.0 && p.years[2].balances.grats == 0.0);
+    }
+
+    #[test]
+    fn rolling_grats_keep_going_until_the_chosen_age() {
+        let grat = |rolling| {
+            let mut h = family(vec![Event::Grat {
+                account_id: 1,
+                age: 58,
+                amount: 1_000_000.0,
+                term_years: 2,
+                rolling,
+                until_age: 66,
+            }]);
+            h.accounts[0].id = Some(1);
+            h.accounts[0].stocks_pct = 1.0;
+            h.accounts[0].bonds_pct = 0.0;
+            project(&h, Some(1), 2026).unwrap()
+        };
+        let (once, rolled) = (grat(false), grat(true));
+        let total = |p: &Projection| p.years.iter().map(|y| y.grat_remainders).fold(0.0, f64::add);
+        assert!(total(&rolled) > 3.0 * total(&once));
+        // Rolling stops at 66: the last GRAT starts then and finishes two years later.
+        let last = rolled.years.iter().rposition(|y| y.balances.grats > 0.0).unwrap();
+        assert_eq!(rolled.years[last].age, 67);
+    }
+
+    #[test]
+    fn property_tax_and_mortgage_interest_can_be_itemized() {
+        let mut h = household(
+            vec![me(1968)],
+            vec![account(AccountType::TradIra, 3_000_000.0, None, 0.6), account(AccountType::Checking, 0.0, None, 0.0)],
+            150_000.0,
+        );
+        let standard = project(&h, None, 2026).unwrap();
+        assert!(!standard.years[0].tax.itemized);
+        h.info.home_property_tax = 30_000.0;
+        h.debts.push(crate::model::Debt {
+            id: None,
+            name: "Mortgage".into(),
+            kind: DebtKind::Mortgage,
+            balance: 1_000_000.0,
+            interest_rate: 0.06,
+            monthly_payment: 7_000.0,
+            account_id: None,
+            notes: String::new(),
+            home_mortgage: true,
+        });
+        let p = project(&h, None, 2026).unwrap();
+        let y0 = &p.years[0];
+        assert!(y0.tax.itemized);
+        // 30k property tax + interest on the first $750k (45k).
+        close(y0.tax.itemized_deductions, 30_000.0 + 45_000.0, 1.0);
+    }
+
+    #[test]
+    fn charitable_bequest_lowers_estate_tax() {
+        let mut h = family(vec![Event::CharitableBequest { share: 0.2, from_ira_first: true }]);
+        h.accounts[0].balance = 30_000_000.0;
+        h.accounts[0].cost_basis = Some(30_000_000.0);
+        let base = project(&h, None, 2026).unwrap().summary.estate;
+        let p = project(&h, Some(1), 2026).unwrap().summary.estate;
+        assert!(p.charitable_bequest_real > 0.0);
+        close(p.charitable_bequest_real, 0.2 * p.gross_estate_real, 1.0);
+        close(base.estate_tax_real - p.estate_tax_real, 0.4 * p.charitable_bequest_real, 1.0);
     }
 
     #[test]

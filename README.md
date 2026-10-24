@@ -73,6 +73,11 @@ The **Scenarios** page holds "what if" plans. Each one is your base plan plus a 
 - help a child buy a home (a down-payment gift, optionally plus a family loan)
 - cash gifts (once or yearly, including "the yearly maximum to each child")
 - family loans
+- stock or investments given in kind
+- a 529 for a child (optionally superfunded) and tuition/medical bills paid directly
+- gifts to charity or a donor-advised fund (cash or appreciated stock), and a charitable bequest
+- a family LLC with yearly discounted gifts of shares
+- GRATs (grantor retained annuity trusts), optionally rolled
 - Roth conversions
 - a spending change
 - a different Social Security age
@@ -95,7 +100,29 @@ Any plan can be viewed on the Forecast page, and two or three can be compared si
 - **"What if taxes rise"** (Assumptions): from a chosen year, every income-tax bracket and the 15%/20% capital-gains rates rise by the points you set.
 - **"How much can you safely give?"** (Scenarios page): the largest gift, split evenly between the children (once now, or every year for N years), that keeps the chance the money lasts at or above a target (default 95%). It runs the same replayed-history scenarios at every trial amount, so a bigger gift never looks safer by luck. The answer is rounded down and re-checked with the full scenario count, and "Make this a plan" saves it.
 - **Giving guide:** every strategy in plain English, with pros, cons, what the app models, and "Try this in a plan".
-- **Not modeled yet:** charity, 529s and direct tuition/medical payments (5.2); a family LLC and GRATs (5.3); state taxes beyond a flat rate.
+- **Itemized deductions** (One Big Beautiful Bill Act rules from 2026), taken each year only when larger than the standard deduction. The senior deduction applies either way.
+  - **State and local taxes (SALT):** your home property tax (Spending page) plus the flat state rate's income tax, capped at **$40,400** in 2026 (+1% a year through 2029). The cap shrinks by 30% of income above **$505,000** (rising 1% a year), never below $10,000, and is a flat **$10,000** from 2030.
+  - **Home mortgage interest:** debts marked "the mortgage on my home", on up to $750,000 of the loan.
+  - **Charity:** cash up to 60% of income (AGI), appreciated stock up to 30%. Anything above carries forward **5 years**, this year's gifts used first. Itemizers deduct only giving above **0.5% of AGI**.
+  - **35% cap:** for the 37% bracket, itemized deductions are reduced by 2/37 of the smaller of the deductions or the income reaching into that bracket, so each dollar saves at most 35 cents.
+  - **Non-itemizers** deduct up to **$1,000** ($2,000 joint) of cash given straight to charities, not to a donor-advised fund.
+- **Charity:** appreciated stock given is deductible at market value, and its gain is never taxed. Cash and stock both leave your estate.
+  - A **charitable bequest** (a share of the estate) is deducted before estate tax. With "IRA money first", it comes out of the traditional IRA, so the kids inherit less of the income-taxed IRA.
+- **529 plans:** money put in leaves your estate and grows tax-free for the child; the app assumes it's spent on education.
+  - **Superfunding** counts up to 5 × the yearly exclusion ($95,000 in 2026) as five years of yearly gifts, one-fifth a year, so it uses no lifetime exemption. If the estate date falls within the five years, the part not yet counted goes back into the estate.
+  - Because amounts are in today's dollars and the exclusion rounds down to $1,000, a 529 made next year at exactly $95,000 has a sliver above the limit.
+- **Tuition and medical bills paid directly** to the school or provider aren't gifts at all: no limit, and no exclusion or exemption used. They still count toward what that child receives, grown like any gift.
+- **Family LLC:** at the age you choose, the amount moves from the account into an LLC invested the same way. It's still yours: not spendable, and its income is taxed to you.
+  - Each year for N years, a share of the LLC goes to the kids, split evenly. They receive its full value (with your cost basis), but the gift is **reported at the discount you set** (20–35% is typical, max 60%).
+  - Once you own **half or less**, your remaining share is valued at the discount in the estate too.
+  - The IRS challenges aggressive discounts: it needs a business purpose, a qualified appraisal and LLC formalities. The app says so wherever an LLC appears.
+- **GRATs:** the amount moves into a trust invested like the source account. It pays you a level annuity whose present value at the **IRS §7520 rate (6.20%, November 2026, Rev. Rul. 2026-21 Table 5)** equals what went in. That's a "zeroed-out" GRAT: the gift counts as about $0.
+  - Payments are made at each anniversary. Whatever is left at the end of the term goes to the kids at your basis.
+  - **Rolling:** each payment starts a new GRAT of the same length, through the age you choose.
+  - Income is taxed to you (a grantor trust). If the estate date falls during a term, the GRAT is still in your estate.
+  - The rate is held at today's 6.20% for all future years.
+  - On the steady path, a mixed portfolio earning under 6.2% passes nothing. GRATs pay off in strong markets, so Compare adds a "strong markets" (9 in 10) row when a plan has one.
+- **Not modeled:** state taxes beyond a flat rate; the IRS valuation discount of LLC shares you keep while still in control; AMT.
 
 ## Private investments
 Accounts can be **Private real estate fund**, **Private credit fund**, **Startup / angel investments**, or **Other private investment**. Each has current value, amount invested, yearly cash paid out (as a share of what was invested), the taxable share of that cash, an exit year and multiple, and for startups the number of companies and a QSBS flag.

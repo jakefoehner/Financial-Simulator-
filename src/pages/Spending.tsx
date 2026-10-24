@@ -19,10 +19,10 @@ export default function Spending() {
   const ed = useEditor<OneTimeExpense>({ save: api.upsertOneTimeExpense, remove: api.deleteOneTimeExpense });
   const [error, setError] = useState<string | null>(null);
 
-  const saveSpending = async (v: number | null) => {
+  const saveInfo = async (patch: Partial<typeof info>) => {
     setError(null);
     try {
-      await mutate(() => api.saveHouseholdInfo({ ...info, baseAnnualSpending: v ?? 0 }));
+      await mutate(() => api.saveHouseholdInfo({ ...info, ...patch }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -42,12 +42,18 @@ export default function Spending() {
 
       <div className="grid gap-6">
         <Card title="Yearly living expenses">
-          <div className="max-w-xs">
+          <div className="grid max-w-2xl gap-4 sm:grid-cols-2">
             <MoneyField
               label="Per year"
               value={info.baseAnnualSpending}
-              onChange={saveSpending}
+              onChange={(v) => saveInfo({ baseAnnualSpending: v ?? 0 })}
               hint="Housing, food, travel, insurance, giving: a typical year. Leave out debt payments and income taxes; those are added for you."
+            />
+            <MoneyField
+              label="Home property tax, per year"
+              value={info.homePropertyTax}
+              onChange={(v) => saveInfo({ homePropertyTax: v ?? 0 })}
+              hint="Already part of your spending above. Used only to see whether itemizing your deductions beats the standard deduction."
             />
           </div>
           {info.baseAnnualSpending > 0 && (

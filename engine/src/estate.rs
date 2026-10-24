@@ -18,6 +18,11 @@
 //! - Anti-clawback (IRS regulations, 2019): if the exemption is cut after you've used it,
 //!   gifts already sheltered stay sheltered. The estate uses the larger of the exemption
 //!   at death and the amount your lifetime gifts locked in.
+//! - A charitable bequest (a share of the estate) is deducted before estate tax. When it
+//!   comes from traditional IRA money first, the kids inherit less of the income-taxed IRA.
+//! - A family LLC share you no longer control (half or less) is valued at its discount.
+//! - 529 superfunding not yet spread over its five years is pulled back into the estate;
+//!   529 growth is tax-free for the kids (assumed used for education).
 
 use std::ops::Add;
 
@@ -66,12 +71,27 @@ pub struct EstateResult {
     pub heirs_capital_gains_tax_real: f64,
     /// True when gifts made under a higher exemption are protecting the estate (anti-clawback).
     pub anti_clawback_applies: bool,
+    /// Left to charity in your will (deducted before estate tax).
+    pub charitable_bequest_real: f64,
+    /// Given to charity during your life, each year in that year's dollars converted to today's.
+    pub lifetime_charity_real: f64,
+    /// Reduction in your LLC share's value for estate tax.
+    pub llc_discount_real: f64,
+    /// 529 superfunding pulled back into the estate (death within the five years).
+    pub superfund_included_real: f64,
     /// Everything the children receive: gifts (grown to the estate date) plus the inheritance after taxes.
     pub family_total_real: f64,
     pub children: Vec<ChildEstate>,
 }
 
-pub fn estate_at(h: &Household, years: &[YearResult], start_year: i32, t: &TaxTables) -> EstateResult {
+/// `bequest`: a share of the estate left to charity, and whether it comes from IRA money first.
+pub fn estate_at(
+    h: &Household,
+    years: &[YearResult],
+    start_year: i32,
+    t: &TaxTables,
+    bequest: Option<(f64, bool)>,
+) -> EstateResult {
     if years.is_empty() {
         return EstateResult::default();
     }
@@ -85,10 +105,15 @@ pub fn estate_at(h: &Household, years: &[YearResult], start_year: i32, t: &TaxTa
     let exemption = exemption_at_death.max(y.sheltered_gifts);
     let gift_tax_paid = years[..=i].iter().map(|y| y.gift_tax).fold(0.0, f64::add);
     let gross = y.net_worth.max(0.0);
-    let taxable = gross + y.lifetime_taxable_gifts - exemption;
+    let ira = y.balances.tax_deferred.max(0.0);
+    let (share, ira_first) = bequest.unwrap_or((0.0, false));
+    let charity = gross * share.clamp(0.0, 1.0);
+    let taxable =
+        gross + y.superfund_pending - y.llc_discount.min(gross) - charity + y.lifetime_taxable_gifts - exemption;
     let estate_tax = (t.estate_gift.top_rate * taxable.max(0.0) - gift_tax_paid).max(0.0);
-    let heirs_income_tax = y.balances.tax_deferred.max(0.0) * a.heir_income_tax_rate;
-    let net = (gross - estate_tax - heirs_income_tax).max(0.0);
+    let heirs_ira = if ira_first { (ira - charity).max(0.0) } else { ira * (1.0 - share.clamp(0.0, 1.0)) };
+    let heirs_income_tax = heirs_ira * a.heir_income_tax_rate;
+    let net = (gross - charity - estate_tax - heirs_income_tax).max(0.0);
 
     // Per child: (gifts in today's dollars when given, grown to the estate date, kids' capital-gains tax),
     // all in today's dollars. Gifts happen at the start of a year, so they grow through that year and later ones.
@@ -98,7 +123,9 @@ pub fn estate_at(h: &Household, years: &[YearResult], start_year: i32, t: &TaxTa
         let growth: f64 = years[k..=i].iter().map(|y| 1.0 + y.portfolio_return).product();
         for g in &yr.gifts_by_child {
             let grown_nominal = g.amount * growth;
-            let tax_nominal = a.heir_capital_gains_rate * (grown_nominal - g.basis).max(0.0);
+            // 529 money grows tax-free; the rest is taxed on growth above the child's basis.
+            let taxed = (g.amount - g.tax_free).max(0.0);
+            let tax_nominal = a.heir_capital_gains_rate * (taxed * growth - (g.basis - g.tax_free)).max(0.0);
             let (face, grown, tax) = (g.amount / level, grown_nominal / price, tax_nominal / price);
             match gifts_by_child.iter_mut().find(|e| e.0 == g.child_id) {
                 Some(e) => {
@@ -121,6 +148,12 @@ pub fn estate_at(h: &Household, years: &[YearResult], start_year: i32, t: &TaxTa
                 if k == 0 { (1.0, 0.0) } else { (years[k - 1].price_level, years[k - 1].lifetime_taxable_gifts) };
             (yr.lifetime_taxable_gifts - before) / level
         })
+        .fold(0.0, f64::add);
+
+    let lifetime_charity_real = years[..=i]
+        .iter()
+        .enumerate()
+        .map(|(k, yr)| yr.charity / if k == 0 { 1.0 } else { years[k - 1].price_level })
         .fold(0.0, f64::add);
 
     let kids: Vec<_> = h.people.iter().filter(|p| p.role == Role::Child).collect();
@@ -171,6 +204,10 @@ pub fn estate_at(h: &Household, years: &[YearResult], start_year: i32, t: &TaxTa
         heir_capital_gains_rate: a.heir_capital_gains_rate,
         heirs_capital_gains_tax_real,
         anti_clawback_applies: y.sheltered_gifts > exemption_at_death,
+        charitable_bequest_real: charity / price,
+        lifetime_charity_real,
+        llc_discount_real: y.llc_discount.min(gross) / price,
+        superfund_included_real: y.superfund_pending / price,
         family_total_real: net_real + lifetime_gifts_grown_real - heirs_capital_gains_tax_real,
         children,
     }
@@ -228,7 +265,7 @@ mod tests {
     #[test]
     fn under_the_exemption_there_is_no_estate_tax() {
         let h = household(2, Assumptions::default());
-        let e = estate_at(&h, &[year(2026, 10_000_000.0, 1_000_000.0, 0.0)], 2026, TaxTables::current());
+        let e = estate_at(&h, &[year(2026, 10_000_000.0, 1_000_000.0, 0.0)], 2026, TaxTables::current(), None);
         close(e.estate_tax_real, 0.0);
         // Heirs owe 24% on the $1M inherited IRA; the rest is split evenly.
         close(e.heirs_income_tax_real, 240_000.0);
@@ -239,7 +276,7 @@ mod tests {
     #[test]
     fn above_the_exemption_pays_40_percent() {
         let h = household(2, Assumptions::default());
-        let e = estate_at(&h, &[year(2026, 20_000_000.0, 0.0, 0.0)], 2026, TaxTables::current());
+        let e = estate_at(&h, &[year(2026, 20_000_000.0, 0.0, 0.0)], 2026, TaxTables::current(), None);
         // (20M − 15M) × 40% = 2M.
         close(e.estate_tax_real, 2_000_000.0);
         close(e.family_total_real, 18_000_000.0);
@@ -249,7 +286,7 @@ mod tests {
     fn lifetime_gifts_use_up_the_exemption() {
         let h = household(1, Assumptions::default());
         // $14M estate + $3M of gifts above the yearly exclusions → $17M taxable → $0.8M tax.
-        let e = estate_at(&h, &[year(2026, 14_000_000.0, 0.0, 3_000_000.0)], 2026, TaxTables::current());
+        let e = estate_at(&h, &[year(2026, 14_000_000.0, 0.0, 3_000_000.0)], 2026, TaxTables::current(), None);
         close(e.estate_tax_real, 800_000.0);
     }
 
@@ -257,8 +294,8 @@ mod tests {
     fn exemption_cut_raises_the_tax_from_its_year() {
         let a = Assumptions { exemption_cut_enabled: true, ..Default::default() };
         let h = household(2, a);
-        let before = estate_at(&h, &[year(2029, 10_000_000.0, 0.0, 0.0)], 2026, TaxTables::current());
-        let after = estate_at(&h, &[year(2031, 10_000_000.0, 0.0, 0.0)], 2026, TaxTables::current());
+        let before = estate_at(&h, &[year(2029, 10_000_000.0, 0.0, 0.0)], 2026, TaxTables::current(), None);
+        let after = estate_at(&h, &[year(2031, 10_000_000.0, 0.0, 0.0)], 2026, TaxTables::current(), None);
         close(before.estate_tax_real, 0.0);
         assert!(after.exemption_cut_applies);
         // (10M − 7M) × 40% = 1.2M.
@@ -269,8 +306,8 @@ mod tests {
     fn gifts_count_toward_each_childs_total() {
         let h = household(2, Assumptions::default());
         let mut y0 = year(2026, 5_000_000.0, 0.0, 81_000.0);
-        y0.gifts_by_child = vec![ChildAmount { child_id: 10, amount: 100_000.0, basis: 100_000.0 }];
-        let e = estate_at(&h, &[y0], 2026, TaxTables::current());
+        y0.gifts_by_child = vec![ChildAmount { child_id: 10, amount: 100_000.0, basis: 100_000.0, tax_free: 0.0 }];
+        let e = estate_at(&h, &[y0], 2026, TaxTables::current(), None);
         let (a, b) = (&e.children[0], &e.children[1]);
         close(a.gifts_real, 100_000.0);
         close(b.gifts_real, 0.0);
@@ -282,11 +319,11 @@ mod tests {
     fn gifts_grow_to_the_estate_date_at_the_portfolio_return() {
         let h = household(1, Assumptions::default());
         let mut y0 = year(2026, 0.0, 0.0, 0.0);
-        y0.gifts_by_child = vec![ChildAmount { child_id: 10, amount: 100_000.0, basis: 100_000.0 }];
+        y0.gifts_by_child = vec![ChildAmount { child_id: 10, amount: 100_000.0, basis: 100_000.0, tax_free: 0.0 }];
         y0.portfolio_return = 0.10;
         let mut y1 = year(2027, 1_000_000.0, 0.0, 0.0);
         y1.portfolio_return = 0.10;
-        let e = estate_at(&h, &[y0, y1], 2026, TaxTables::current());
+        let e = estate_at(&h, &[y0, y1], 2026, TaxTables::current(), None);
         // Given at the start of 2026, grown through 2026 and 2027: 100k × 1.1² = 121k.
         // The kids owe 15% on the 21k of growth when they sell (3,150).
         close(e.children[0].gifts_real, 100_000.0);
@@ -300,8 +337,8 @@ mod tests {
         // $100k of stock with a $20k basis, sold right away: 15% × 80k = 12k of tax for the kids.
         let h = household(1, Assumptions::default());
         let mut y0 = year(2026, 0.0, 0.0, 0.0);
-        y0.gifts_by_child = vec![ChildAmount { child_id: 10, amount: 100_000.0, basis: 20_000.0 }];
-        let e = estate_at(&h, &[y0], 2026, TaxTables::current());
+        y0.gifts_by_child = vec![ChildAmount { child_id: 10, amount: 100_000.0, basis: 20_000.0, tax_free: 0.0 }];
+        let e = estate_at(&h, &[y0], 2026, TaxTables::current(), None);
         close(e.children[0].gifts_capital_gains_tax_real, 12_000.0);
         close(e.children[0].total_real, 88_000.0);
     }
@@ -315,9 +352,50 @@ mod tests {
         let h = household(2, a);
         let mut y = year(2031, 10_000_000.0, 0.0, 10_000_000.0);
         y.sheltered_gifts = 10_000_000.0;
-        let e = estate_at(&h, &[y], 2026, TaxTables::current());
+        let e = estate_at(&h, &[y], 2026, TaxTables::current(), None);
         assert!(e.anti_clawback_applies);
         close(e.estate_tax_real, 4_000_000.0);
+    }
+
+    #[test]
+    fn charitable_bequest_is_deducted_and_can_take_the_ira_first() {
+        // $25M estate, $2M of it in an IRA; 10% ($2.5M) to charity.
+        // Taxable: 25 − 2.5 − 15 = 7.5M → 3M estate tax.
+        let h = household(2, Assumptions::default());
+        let years = [year(2026, 25_000_000.0, 2_000_000.0, 0.0)];
+        let ira_first = estate_at(&h, &years, 2026, TaxTables::current(), Some((0.1, true)));
+        close(ira_first.charitable_bequest_real, 2_500_000.0);
+        close(ira_first.estate_tax_real, 3_000_000.0);
+        // The IRA all went to charity: no income tax for the kids. 25 − 2.5 − 3 = 19.5M.
+        close(ira_first.heirs_income_tax_real, 0.0);
+        close(ira_first.net_inheritance_real, 19_500_000.0);
+        // Pro rata instead: the kids keep 90% of the IRA and owe 24% on it (432k).
+        let pro_rata = estate_at(&h, &years, 2026, TaxTables::current(), Some((0.1, false)));
+        close(pro_rata.heirs_income_tax_real, 432_000.0);
+    }
+
+    #[test]
+    fn llc_discount_and_pending_superfund_change_the_taxable_estate() {
+        let h = household(1, Assumptions::default());
+        let mut y = year(2026, 20_000_000.0, 0.0, 0.0);
+        y.llc_discount = 1_000_000.0;
+        y.superfund_pending = 76_000.0;
+        // (20 − 1 + 0.076 − 15) × 40% = 1,630,400. The kids still get the full $20M less tax.
+        let e = estate_at(&h, &[y], 2026, TaxTables::current(), None);
+        close(e.estate_tax_real, 1_630_400.0);
+        close(e.net_inheritance_real, 20_000_000.0 - 1_630_400.0);
+    }
+
+    #[test]
+    fn growth_in_a_529_is_not_taxed() {
+        let h = household(1, Assumptions::default());
+        let mut y0 = year(2026, 0.0, 0.0, 0.0);
+        y0.gifts_by_child =
+            vec![ChildAmount { child_id: 10, amount: 100_000.0, basis: 100_000.0, tax_free: 100_000.0 }];
+        y0.portfolio_return = 0.10;
+        let e = estate_at(&h, &[y0], 2026, TaxTables::current(), None);
+        close(e.children[0].gifts_grown_real, 110_000.0);
+        close(e.children[0].gifts_capital_gains_tax_real, 0.0);
     }
 
     #[test]
@@ -325,6 +403,6 @@ mod tests {
         let a = Assumptions { estate_age: Some(59), ..Default::default() };
         let h = household(1, a);
         let years = [year(2026, 1.0, 0.0, 0.0), year(2027, 2.0, 0.0, 0.0), year(2028, 3.0, 0.0, 0.0)];
-        assert_eq!(estate_at(&h, &years, 2026, TaxTables::current()).age, 59);
+        assert_eq!(estate_at(&h, &years, 2026, TaxTables::current(), None).age, 59);
     }
 }

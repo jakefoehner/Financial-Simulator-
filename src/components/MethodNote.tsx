@@ -119,6 +119,31 @@ function MethodPanel({ assumptions: a, onClose }: { assumptions: Assumptions; on
             Federal only (Texas has no estate tax). A planning estimate, not legal or tax advice; confirm big gifting
             decisions with an estate attorney.
           </Section>
+          <Section title="Deductions, charity & education">
+            Each year the app itemizes deductions when that beats the standard deduction (2026 rules): your home
+            property tax and any state income tax, up to the SALT cap ($40,400 in 2026, shrinking by 30% of income above
+            $505,000 but not below $10,000, and $10,000 from 2030); interest on up to $750,000 of your home mortgage;
+            and charity. Charity counts only above 0.5% of your income, cash up to 60% of income and appreciated stock
+            up to 30%, with the rest carried forward 5 years. In the top bracket each deducted dollar saves at most 35
+            cents. Without itemizing, up to $1,000 of cash given straight to charities is still deductible. Stock given
+            to charity is deductible at market value and its gain is never taxed. A charitable bequest is deducted
+            before estate tax, and IRA money left to charity first spares your kids its income tax. A 529 leaves your
+            estate and grows tax-free (assumed spent on school). Superfunding counts it as five years of yearly gifts,
+            but part returns to the estate if the estate date falls within those years. Tuition and medical bills paid
+            directly aren't gifts at all.
+          </Section>
+          <Section title="Family LLC & GRATs">
+            A family LLC holds investments you move into it; you keep managing them and pay tax on their income. The
+            shares you give the kids are reported at the valuation discount you set, and once you own half or less your
+            own share is discounted in the estate too. The IRS challenges aggressive discounts; set one up with an
+            estate attorney and a qualified appraisal.{" "}
+            {facts
+              ? `A GRAT pays you back what you put in plus interest at the IRS §7520 rate (${pct(facts.section7520)}, ${afrMonthLabel(facts)}, held for future years), so the gift counts as about $0. `
+              : "A GRAT pays you back what you put in plus interest at the IRS §7520 rate, so the gift counts as about $0. "}
+            Growth above that rate goes to your kids at the end of each term (with your cost basis); rolling GRATs start
+            a new one with every payment. A GRAT still in its term at the estate date counts in your estate. GRATs pay
+            off in strong markets and give nothing back in weak ones, so compare plans in the range of outcomes.
+          </Section>
           <Section title="Private investments">
             Real estate funds, private credit, and other private investments pay their yearly cash (as a share of what
             you invested; you set the taxable share) and grow toward their sale value, which moves with replayed home

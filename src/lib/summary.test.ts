@@ -8,7 +8,14 @@ const retiree = retireeJson as unknown as Household;
 const earlyCareer = earlyCareerJson as unknown as Household;
 
 const empty: Household = {
-  info: { name: "My Household", state: "TX", flatStateRate: 0, filingStatus: "single", baseAnnualSpending: 0 },
+  info: {
+    name: "My Household",
+    state: "TX",
+    flatStateRate: 0,
+    filingStatus: "single",
+    baseAnnualSpending: 0,
+    homePropertyTax: 0,
+  },
   people: [],
   accounts: [],
   income: [],

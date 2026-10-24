@@ -34,6 +34,8 @@ export interface HouseholdInfo {
   flatStateRate: number;
   filingStatus: FilingStatus;
   baseAnnualSpending: number;
+  /** Yearly home property tax in today's dollars (part of spending; used for itemized deductions). */
+  homePropertyTax: number;
 }
 
 export interface Person {
@@ -97,6 +99,8 @@ export interface Debt {
   monthlyPayment: number;
   accountId: Id | null;
   notes: string;
+  /** The mortgage on your own home: its interest can be itemized. */
+  homeMortgage: boolean;
 }
 
 export interface OneTimeExpense {
@@ -150,7 +154,38 @@ export type Event =
   | { type: "gift_assets"; to: Id | null; accountId: Id; age: number; amount: number }
   | { type: "social_security_age"; age: number }
   | { type: "spending_change"; fromAge: number; annualAmount: number }
-  | { type: "roth_conversion"; perYear: number; fromAge: number; toAge: number };
+  | { type: "roth_conversion"; perYear: number; fromAge: number; toAge: number }
+  | {
+      type: "charity_gift";
+      amount: number;
+      fromAge: number;
+      years: number;
+      /** Give appreciated investments from this account; `null` = cash. */
+      accountId: Id | null;
+      donorAdvised: boolean;
+    }
+  | { type: "charitable_bequest"; share: number; fromIraFirst: boolean }
+  | { type: "fund529"; to: Id; age: number; amount: number; superfund: boolean }
+  | { type: "pay_tuition_medical"; to: Id; amount: number; fromAge: number; years: number }
+  | {
+      type: "family_llc";
+      accountId: Id;
+      age: number;
+      amount: number;
+      discount: number;
+      /** Share of the LLC given each year, split evenly between the kids. */
+      giftShare: number;
+      years: number;
+    }
+  | {
+      type: "grat";
+      accountId: Id;
+      age: number;
+      amount: number;
+      termYears: number;
+      rolling: boolean;
+      untilAge: number;
+    };
 
 export type EventType = Event["type"];
 

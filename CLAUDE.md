@@ -17,6 +17,7 @@ A wealthy, retired single mother in Texas, weighing estate/gift decisions (gifti
 - Private-investment and startup outcome assumptions live in `engine/src/montecarlo.rs` and are mirrored in `src/lib/simulation.ts` (`PRIVATE_ASSUMPTIONS`); change both together. The solver is `engine/src/solver.rs`.
 - Scenarios = base plan + `Event` decisions (`engine/src/model.rs`), applied in `projection.rs`. The estate math is in `estate.rs`. Every projection/simulation command takes an optional scenario id (`None` = base plan). Estate figures shown to users must keep the heirs'-tax assumption and the not-legal-advice note visible (`FamilyCard.tsx`, MethodNote, README "Scenarios, gifts & estate").
 - Range of outcomes = **centered historical replay only** (`engine/src/history.rs`, `montecarlo.rs`); no parametric returns. If the method changes, update all three explanations together: `src/components/MethodNote.tsx`, README "How the forecast works", and the `docs/SPEC.md` Decisions log.
+- Gifts have two sides in `projection.rs`: what a child receives (`ChildAmount`, used for the family totals) and what's reported to the gift ledger (exclusion/exemption). Tuition/medical, 529 superfunding, LLC discounts and GRAT remainders differ between the two; keep that split when adding transfer types.
 - Never commit real personal data (`*.sqlite`, `*.fsim` are gitignored).
 
 ## Commands

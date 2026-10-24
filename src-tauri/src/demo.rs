@@ -61,6 +61,7 @@ mod tests {
                 "afrShortTerm": t.afr.short_term,
                 "afrMidTerm": t.afr.mid_term,
                 "afrLongTerm": t.afr.long_term,
+                "section7520": t.afr.section_7520,
             },
         });
         let out = json.as_object_mut().unwrap();
@@ -116,7 +117,7 @@ mod tests {
     fn demo_plans_are_sane() {
         use engine::projection::project;
         let mut h = household(Demo::Retiree);
-        let plans = [None, Some(1), Some(2), Some(3), Some(4), Some(5)];
+        let plans = [None, Some(1), Some(2), Some(3), Some(4), Some(5), Some(6), Some(7), Some(8), Some(9)];
         let run = |h: &engine::model::Household| plans.map(|p| project(h, p, 2026).unwrap().summary.estate);
         let now = run(&h);
         h.assumptions.exemption_cut_enabled = true;
@@ -131,7 +132,7 @@ mod tests {
                 e.children.iter().map(|c| c.total_real.round()).collect::<Vec<_>>()
             );
         }
-        let [base, home, yearly, loan, stock, big] = &now;
+        let [base, home, yearly, loan, stock, big, charity, education, llc, grats] = &now;
         assert!(base.estate_tax_real > 0.0, "an estate above the exemption should owe some estate tax");
         // Yearly exclusion gifts lower the estate tax and raise what the family gets in total.
         assert!(yearly.estate_tax_real < base.estate_tax_real);
@@ -155,6 +156,55 @@ mod tests {
         println!("big gift saves {saved_now:.0} now, {saved_if_cut:.0} if the exemption is cut");
         assert!(saved_if_cut >= saved_now - 1.0);
         assert!(big.family_total_real > base.family_total_real);
+
+        // Charity: less estate tax, and charity gets the gifts plus the bequest.
+        println!(
+            "charity: {:.0} in life + {:.0} bequest; estate tax {:.0} vs {:.0}",
+            charity.lifetime_charity_real,
+            charity.charitable_bequest_real,
+            charity.estate_tax_real,
+            base.estate_tax_real
+        );
+        assert!(charity.lifetime_charity_real > 900_000.0 && charity.charitable_bequest_real > 0.0);
+        assert!(charity.estate_tax_real < base.estate_tax_real);
+        // 529s and tuition: almost no exemption used, and the kids come out ahead. ($95K in today's
+        // dollars is a bit more than 5 × next year's exclusion, which rounds down to $19K, so a
+        // sliver is above the superfunding limit.)
+        assert!(education.lifetime_taxable_gifts_real < 5_000.0, "{}", education.lifetime_taxable_gifts_real);
+        assert!(education.family_total_real > base.family_total_real);
+        // A family LLC moves more for less exemption than giving the same value outright.
+        println!(
+            "LLC: exemption used {:.0} for {:.0} given; family total {:.0} vs {:.0}",
+            llc.lifetime_taxable_gifts_real, llc.lifetime_gifts_real, llc.family_total_real, base.family_total_real
+        );
+        assert!(llc.lifetime_taxable_gifts_real < 0.75 * llc.lifetime_gifts_real);
+        assert!(llc.family_total_real > base.family_total_real);
+        // GRATs use no exemption. On the steady path the brokerage mix earns less than the 6.2%
+        // §7520 rate every year, so everything comes back and nothing passes; see the range test below.
+        println!("GRATs: passed {:.0}; family total {:.0}", grats.lifetime_gifts_real, grats.family_total_real);
+        assert_eq!(grats.lifetime_taxable_gifts_real, 0.0);
+        assert!(grats.family_total_real >= base.family_total_real - 1.0);
+    }
+
+    /// GRATs are a bet on beating the §7520 rate: across market scenarios they should help
+    /// most in strong markets and cost little in weak ones.
+    #[test]
+    fn demo_grats_pay_off_in_strong_markets() {
+        use engine::montecarlo::simulate;
+        let h = household(Demo::Retiree);
+        let base = simulate(&h, None, 2026).unwrap().estate;
+        let grats = simulate(&h, Some(9), 2026).unwrap().estate;
+        println!(
+            "kids' total p10/p50/p90 base {:.0}/{:.0}/{:.0}, GRATs {:.0}/{:.0}/{:.0}",
+            base.family_total_real.p10,
+            base.family_total_real.p50,
+            base.family_total_real.p90,
+            grats.family_total_real.p10,
+            grats.family_total_real.p50,
+            grats.family_total_real.p90
+        );
+        assert!(grats.family_total_real.p90 > base.family_total_real.p90);
+        assert!(grats.family_total_real.p10 > 0.97 * base.family_total_real.p10);
     }
 
     #[test]

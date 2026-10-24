@@ -20,6 +20,8 @@ function year(overrides: Partial<YearResult>): YearResult {
     education: 0,
     loansReceivable: 0,
     private: 0,
+    familyLlc: 0,
+    grats: 0,
   };
   return {
     year: 2026,
@@ -55,6 +57,14 @@ function year(overrides: Partial<YearResult>): YearResult {
     privateIncome: 0,
     privateProceeds: 0,
     shelteredGifts: 0,
+    charity: 0,
+    charityCash: 0,
+    charityCarryforward: 0,
+    education: 0,
+    superfundPending: 0,
+    llcGifts: 0,
+    llcDiscount: 0,
+    gratRemainders: 0,
     ...overrides,
   };
 }
@@ -124,6 +134,8 @@ describe("rows", () => {
         education: 6,
         loansReceivable: 0,
         private: 0,
+        familyLlc: 0,
+        grats: 0,
       },
       netWorth: 21,
       priceLevel: 1,

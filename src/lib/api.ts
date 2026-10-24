@@ -34,6 +34,8 @@ export interface TaxFacts {
   afrShortTerm: number;
   afrMidTerm: number;
   afrLongTerm: number;
+  /** IRS §7520 rate: values GRAT annuities. */
+  section7520: number;
 }
 
 export const api = {

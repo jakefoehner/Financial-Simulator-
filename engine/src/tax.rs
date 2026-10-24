@@ -4,9 +4,12 @@
 //! deduction), qualified dividends / long-term gains at 0/15/20% stacked on
 //! ordinary income, taxation of Social Security, payroll (FICA, additional
 //! Medicare) and self-employment tax, 3.8% NIIT, the child tax credit, the 10%
-//! early-withdrawal penalty, and an optional flat state rate.
+//! early-withdrawal penalty, an optional flat state rate, and itemized deductions
+//! (state/local taxes under the SALT cap, home mortgage interest, charity with
+//! its AGI limits and 0.5% floor, the 35% cap for the top bracket, and the
+//! charity deduction for non-itemizers), whichever is larger than the standard one.
 //!
-//! Not modeled yet: itemized deductions, AMT, QBI, ACA credits, capital losses.
+//! Not modeled: AMT, QBI, ACA credits.
 
 use serde::Serialize;
 
@@ -48,6 +51,17 @@ pub struct TaxInput {
     pub ordinary_rate_increase: f64,
     /// ...and to the 15% / 20% capital-gains rates.
     pub gains_rate_increase: f64,
+    /// Property tax paid on your home (state income tax is added from `state_rate`).
+    pub property_tax: f64,
+    /// Deductible home mortgage interest (already limited to the first $750k of debt).
+    pub mortgage_interest: f64,
+    /// Cash given to charity this year, plus cash carried forward from earlier years.
+    pub charity_cash: f64,
+    /// Appreciated investments given to charity (deductible at market value, up to 30% of AGI).
+    pub charity_property: f64,
+    /// This year's cash given straight to charities (not a donor-advised fund): what the
+    /// non-itemizer deduction can use.
+    pub charity_cash_public: f64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -56,6 +70,15 @@ pub struct TaxResult {
     pub agi: f64,
     pub taxable_social_security: f64,
     pub deduction: f64,
+    /// True when itemizing beats the standard deduction.
+    pub itemized: bool,
+    /// Itemized deductions after every limit (shown even when the standard deduction wins).
+    pub itemized_deductions: f64,
+    /// Charity that lowered taxable income this year.
+    pub charity_deduction: f64,
+    /// Charity used up against the AGI limits (whether or not itemizing); the rest carries forward.
+    pub charity_cash_absorbed: f64,
+    pub charity_property_absorbed: f64,
     pub taxable_income: f64,
     pub ordinary_tax: f64,
     pub capital_gains_tax: f64,
@@ -107,19 +130,50 @@ pub fn compute(t: &TaxTables, i: &TaxInput) -> TaxResult {
     let agi = (income_before_ss + taxable_ss).max(0.0);
 
     // --- Deductions ---
-    let mut deduction =
-        t.standard_deduction.get(s) * idx + t.additional_deduction_65.get(s) * idx * i.filers_65_plus as f64;
+    let standard = t.standard_deduction.get(s) * idx + t.additional_deduction_65.get(s) * idx * i.filers_65_plus as f64;
+    // The senior deduction is available whether or not you itemize.
+    let mut senior = 0.0;
     let sd = &t.senior_deduction;
     if i.year <= sd.last_year && (s != FilingStatus::MarriedSeparate || sd.married_separate_eligible) {
         let reduction = sd.phaseout_rate * (agi - sd.phaseout_start.get(s)).max(0.0);
-        deduction += (sd.per_person - reduction).max(0.0) * i.filers_65_plus as f64;
+        senior = (sd.per_person - reduction).max(0.0) * i.filers_65_plus as f64;
     }
+    let brackets = t.ordinary_brackets.get(s);
+    let it = &t.itemized;
+    let half = if s == FilingStatus::MarriedSeparate { 0.5 } else { 1.0 };
+    let salt_paid = i.property_tax + i.state_rate * (agi - standard).max(0.0);
+    let salt = salt_paid.min(half * it.salt_cap(i.year, t.year, agi / half));
+    // Charity: investments up to 30% of AGI, everything up to 60%; the rest carries forward.
+    // Itemizers deduct only what's above 0.5% of AGI.
+    let charity_property_absorbed = i.charity_property.max(0.0).min(it.charity_property_limit_pct_agi * agi);
+    let charity_cash_absorbed =
+        i.charity_cash.max(0.0).min((it.charity_cash_limit_pct_agi * agi - charity_property_absorbed).max(0.0));
+    let charity_itemized =
+        (charity_cash_absorbed + charity_property_absorbed - it.charity_floor_pct_agi * agi).max(0.0);
+    let itemized_raw = salt + i.mortgage_interest.max(0.0) + charity_itemized;
+    // Top bracket: itemized deductions save at most 35 cents per dollar (reduced by 2/37 of the
+    // smaller of the deductions and income reaching into the 37% bracket).
+    let top = brackets.last().map_or(0.0, |b| b.rate);
+    let top_start = brackets.iter().rev().nth(1).and_then(|b| b.up_to).map_or(f64::INFINITY, |u| u * idx);
+    let into_top = ((agi - senior - itemized_raw).max(0.0) + itemized_raw - top_start).max(0.0);
+    let haircut = if top > it.top_rate_benefit_cap {
+        (top - it.top_rate_benefit_cap) / top * itemized_raw.min(into_top)
+    } else {
+        0.0
+    };
+    let itemized_deductions = itemized_raw - haircut;
+    let itemized = itemized_deductions > standard;
+    let charity_deduction = if itemized {
+        charity_itemized
+    } else {
+        i.charity_cash_public.max(0.0).min(*it.non_itemizer_charity.get(s)).min(charity_cash_absorbed)
+    };
+    let deduction = senior + if itemized { itemized_deductions } else { standard + charity_deduction };
     let taxable_income = (agi - deduction).max(0.0);
 
     // --- Ordinary vs. preferential income ---
     let preferential = (i.qualified_dividends + i.long_term_gains).min(taxable_income);
     let ordinary_income = taxable_income - preferential;
-    let brackets = t.ordinary_brackets.get(s);
     let ordinary_tax = bracket_tax(brackets, ordinary_income, idx) + i.ordinary_rate_increase * ordinary_income;
 
     let zero_top = t.capital_gains.zero_rate_up_to.get(s) * idx;
@@ -151,6 +205,11 @@ pub fn compute(t: &TaxTables, i: &TaxInput) -> TaxResult {
         agi,
         taxable_social_security: taxable_ss,
         deduction,
+        itemized,
+        itemized_deductions,
+        charity_deduction,
+        charity_cash_absorbed,
+        charity_property_absorbed,
         taxable_income,
         ordinary_tax,
         capital_gains_tax,
@@ -368,6 +427,93 @@ mod tests {
         let plain = TaxInput { wages_by_person: vec![100_000.0], ..base(FilingStatus::Single) };
         let with_loss = TaxInput { capital_loss_deduction: 3_000.0, ..plain.clone() };
         close(compute(tables(), &plain).agi - compute(tables(), &with_loss).agi, 3_000.0);
+    }
+
+    #[test]
+    fn small_itemized_deductions_lose_to_the_standard_deduction() {
+        // Property tax 8,000 + charity 5,000 (−0.5% × 100,000 floor = 4,500) = 12,500 < 16,100.
+        let r = compute(
+            tables(),
+            &TaxInput {
+                pension_and_other: 100_000.0,
+                property_tax: 8_000.0,
+                charity_cash: 5_000.0,
+                charity_cash_public: 5_000.0,
+                ..base(FilingStatus::Single)
+            },
+        );
+        assert!(!r.itemized);
+        close(r.itemized_deductions, 12_500.0);
+        // Non-itemizers still deduct up to $1,000 of cash given straight to charity.
+        close(r.charity_deduction, 1_000.0);
+        close(r.deduction, 17_100.0);
+    }
+
+    #[test]
+    fn itemizing_with_the_salt_cap_floor_and_mortgage() {
+        // Single, IRA income 300,000 (AGI 300,000, under the SALT phase-down).
+        // SALT: 50,000 property tax, capped at 40,400. Mortgage interest 20,000.
+        // Charity 30,000 cash − 1,500 floor = 28,500. Itemized 88,900 > 16,100.
+        let r = compute(
+            tables(),
+            &TaxInput {
+                traditional_distributions: 300_000.0,
+                property_tax: 50_000.0,
+                mortgage_interest: 20_000.0,
+                charity_cash: 30_000.0,
+                ..base(FilingStatus::Single)
+            },
+        );
+        assert!(r.itemized);
+        close(r.itemized_deductions, 88_900.0);
+        close(r.taxable_income, 211_100.0);
+        close(r.charity_deduction, 28_500.0);
+    }
+
+    #[test]
+    fn salt_cap_shrinks_for_high_incomes() {
+        // AGI 605,000: cap 40,400 − 30% × 100,000 = 10,400.
+        let r = compute(
+            tables(),
+            &TaxInput { traditional_distributions: 605_000.0, property_tax: 30_000.0, ..base(FilingStatus::Single) },
+        );
+        close(r.itemized_deductions, 10_400.0);
+        assert!(!r.itemized);
+    }
+
+    #[test]
+    fn charity_of_stock_is_limited_to_30_percent_of_agi() {
+        // AGI 200,000; $100,000 of stock given: 60,000 usable (30%), the rest carries forward.
+        // Itemized 60,000 − 1,000 floor = 59,000.
+        let r = compute(
+            tables(),
+            &TaxInput {
+                traditional_distributions: 200_000.0,
+                charity_property: 100_000.0,
+                charity_cash: 100_000.0,
+                ..base(FilingStatus::Single)
+            },
+        );
+        close(r.charity_property_absorbed, 60_000.0);
+        // Cash fills the rest of the 60% limit: 120,000 − 60,000.
+        close(r.charity_cash_absorbed, 60_000.0);
+        close(r.charity_deduction, 120_000.0 - 1_000.0);
+    }
+
+    #[test]
+    fn top_bracket_itemized_benefit_is_capped_at_35_percent() {
+        // Single, ordinary income 1,000,000 (37% bracket starts at 640,600). Charity 100,000 cash.
+        // Raw itemized: 100,000 − 5,000 floor = 95,000. Income into 37% before the cut:
+        // (1,000,000 − 95,000) + 95,000 − 640,600 = 359,400 → haircut 2/37 × 95,000 = 5,135.14.
+        let r = compute(
+            tables(),
+            &TaxInput { pension_and_other: 1_000_000.0, charity_cash: 100_000.0, ..base(FilingStatus::Single) },
+        );
+        close(r.itemized_deductions, 95_000.0 - 95_000.0 * 2.0 / 37.0);
+        // Each deducted dollar saves 35 cents, not 37: tax falls by 35% × 95,000 = 33,250.
+        let none = compute(tables(), &TaxInput { pension_and_other: 1_000_000.0, ..base(FilingStatus::Single) });
+        // Without charity she takes the standard 16,100 (all at 37%).
+        close(none.income_tax - r.income_tax, 0.37 * (r.itemized_deductions - 16_100.0));
     }
 
     #[test]
