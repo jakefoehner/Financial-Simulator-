@@ -137,14 +137,30 @@ Accounts can be **Private real estate fund**, **Private credit fund**, **Startup
 - These are planning assumptions (`engine/src/montecarlo.rs`, mirrored in `src/lib/simulation.ts`).
 - **Limits:** this is a planning estimate, not legal or tax advice. Confirm big gifting decisions with an estate attorney.
 
-## Saving & restoring your data
-Everything you enter can be saved to one **backup file** (`.fsim`) and opened again in this or any later version, on this Mac or another one. Use **Settings → Your data**, or the File menu (⌘S / ⌘O).
+## Family households
+Each child listed on your People page can have a **full household of their own**: people (their spouse or kids), accounts, income, debts, spending, plans, and a forecast, the same as yours. **Build Sam's household** on the People page creates it. Switch between households at the top of the sidebar.
 
-- **What's in it:** the whole household: people, accounts (including private-fund terms), income, debts, spending and one-time costs, assumptions, and every plan with its decisions. App settings (like the backup folder) aren't included.
-- **Format** (`src-tauri/src/backup.rs`): JSON, `{ "format": "finance-simulator-backup", "formatVersion": 1, "appVersion", "savedAt", "household" }`. A plain backup opens in any text editor.
+- **Linked to yours.** A child's household picks one of your plans (on its Forecast, "From Pat's plan"). Everything that plan sends that child arrives as money in their forecast:
+  - cash gifts and down-payment help go into their savings
+  - gifted stock, LLC shares and GRAT remainders land in a brokerage account with your cost basis
+  - 529 money lands in a 529
+  - a family loan arrives as cash, and its payments go out each year (net of forgiveness)
+  - tuition and medical bills you pay are listed but not added (they cover costs the child would otherwise have)
+  - their share of the inheritance, after estate tax and the heirs' IRA tax, arrives the year after your estate age, with a stepped-up basis
+- **Simplification:** your side uses your plan's steady path. In the child's range of outcomes, their markets vary while your gifts stay as planned.
+- **Storage:** one SQLite file per household (`household.sqlite` is yours; children's are `children/<n>.sqlite`), listed in a `family_household` table (migration 0009). Removing a child from your People page keeps their household, unlinked.
+
+## Saving & restoring your data
+Everything you enter can be saved to one **backup file** (`.fsim`) and opened again in this or any later version, on this Mac or another one. Use the **Save & load** page, or the File menu (⌘S / ⌘O).
+
+- **What's in it:** every household (yours and your children's): people, accounts (including private-fund terms), income, debts, spending and one-time costs, assumptions, and every plan with its decisions, plus how each child household is linked. App settings (like the backup folder) aren't included. "Save just one household" makes a file with only the household on screen, for a child to send theirs.
+- **Format** (`src-tauri/src/backup.rs`): JSON, `{ "format": "finance-simulator-backup", "formatVersion": 2, "appVersion", "savedAt", "households": [{ "name", "linkedTo", "household" }] }`, yours first. Version 1 files (a single `"household"`) open as one household. A plain backup opens in any text editor.
 - **Password (optional):** the file is encrypted with **XChaCha20-Poly1305**, with the key derived from the password by **Argon2id** (19 MiB, 2 passes; the parameters are stored in the file). A wrong password or a damaged file is refused cleanly. A forgotten password can't be recovered.
-- **Opening a backup replaces your data,** after showing what's in it (name, saved date, version, counts). A **safety copy** of the current data is saved first, and also before loading a demo or erasing everything. Safety copies go to the backup folder if automatic backups are on, otherwise to "Safety copies" in the app's data folder.
-- **Automatic backups** (optional, to a folder you choose, such as iCloud Drive): written after changes (at most every 5 minutes) and when you quit. The newest 10 are kept (only files the app named are ever deleted). They have no password.
+- **Loading a backup** shows what's in it first (households, saved date, version, counts).
+  - A family file replaces everything.
+  - A one-household file can be loaded as everything, as your household, as a child's household (linked to them, replacing theirs if they have one), or as a new unlinked household. A file named after one of your children defaults to that child.
+  - A **safety copy** of the whole family is saved first, and also before loading a demo, erasing, or deleting a child's household. Safety copies go to the backup folder if automatic backups are on, otherwise to "Safety copies" in the app's data folder.
+- **Automatic backups** of the whole family (optional, to a folder you choose, such as iCloud Drive): written after changes (at most every 5 minutes) and when you quit. The newest 10 are kept (only files the app named are ever deleted). They have no password.
 - **The compatibility promise:** a backup from any version opens in every later version.
   - New fields always have defaults (`#[serde(default)]`), and unknown fields are ignored.
   - Renames or restructures add a step to `upgrade()` in `backup.rs` and bump `formatVersion`.

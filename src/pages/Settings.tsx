@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
 import { Button, Card, PageHeader } from "../components/Card";
-import { PercentField, Row, SelectField, TextField, Toggle } from "../components/fields";
+import { PercentField, Row, SelectField, TextField } from "../components/fields";
 import { ConfirmDialog } from "../components/Sheet";
-import { open } from "@tauri-apps/plugin-dialog";
-import { api, type AppInfo, type BackupStatus } from "../lib/api";
-import { friendlyPath, savedAtLabel } from "../lib/backup";
+import { api, type AppInfo } from "../lib/api";
 import { shallowEqual } from "../lib/equal";
 import { useApp } from "../lib/store";
 import { FILING_STATUS_LABELS, type FilingStatus, type HouseholdInfo } from "../lib/types";
@@ -17,8 +15,7 @@ export default function Settings() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [confirmErase, setConfirmErase] = useState(false);
-  const requestBackup = useApp((s) => s.requestBackup);
-  const [backups, setBackups] = useState<BackupStatus | null>(null);
+  const viewingChild = useApp((s) => s.family?.households.some((h) => h.active && h.id != null) ?? false);
 
   useEffect(() => setDraft(info), [info]);
   useEffect(() => {
@@ -27,26 +24,6 @@ export default function Settings() {
       .then(setAbout)
       .catch((e) => setError(String(e)));
   }, []);
-  // Reload after every change: an automatic backup may have just been written.
-  useEffect(() => {
-    api
-      .getBackupSettings()
-      .then(setBackups)
-      .catch((e) => setError(String(e)));
-  }, [info]);
-
-  const saveBackupSettings = (autoBackup: boolean, backupFolder: string | null) =>
-    run(async () => setBackups(await api.saveBackupSettings({ autoBackup, backupFolder, lastAutoBackup: null })));
-
-  const chooseFolder = async () => {
-    const folder = await open({
-      directory: true,
-      multiple: false,
-      defaultPath: backups?.settings.backupFolder ?? undefined,
-      title: "Choose a folder for automatic backups",
-    });
-    if (typeof folder === "string") await saveBackupSettings(true, folder);
-  };
 
   const dirty = !shallowEqual(draft, info);
   const set = <K extends keyof HouseholdInfo>(k: K, v: HouseholdInfo[K]) => {
@@ -71,60 +48,6 @@ export default function Settings() {
       {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       <div className="grid max-w-2xl gap-5">
-        <Card title="Your data">
-          <p className="text-sm text-[var(--muted)]">
-            Save everything you've entered to a file you keep. It opens in this and every future version of the app, so
-            you never have to type it in again.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button variant="primary" onClick={() => requestBackup("save")}>
-              Save a backup…
-            </Button>
-            <Button onClick={() => requestBackup("open")}>Open a backup…</Button>
-          </div>
-          <p className="mt-2 text-xs text-[var(--muted)]">Also in the File menu (⌘S to save, ⌘O to open).</p>
-
-          {backups && (
-            <div className="mt-5 grid gap-3 border-t border-[var(--border)] pt-4">
-              <Toggle
-                label="Save backups automatically"
-                hint="After you make changes (at most every 5 minutes) and when you quit. The newest 10 are kept."
-                checked={backups.settings.autoBackup}
-                onChange={(on) =>
-                  on && !backups.settings.backupFolder
-                    ? void chooseFolder()
-                    : void saveBackupSettings(on, backups.settings.backupFolder)
-                }
-              />
-              {backups.settings.backupFolder ? (
-                <div className="flex items-center justify-between gap-4 text-sm">
-                  <span className="min-w-0">
-                    <span className="text-[var(--muted)]">Folder: </span>
-                    <span className="break-all select-text">{friendlyPath(backups.settings.backupFolder)}</span>
-                  </span>
-                  <Button variant="ghost" onClick={() => void chooseFolder()}>
-                    Change…
-                  </Button>
-                </div>
-              ) : (
-                <p className="text-xs text-[var(--muted)]">
-                  Suggested: a folder in Documents, or in iCloud Drive to keep a copy off this Mac (
-                  {friendlyPath(backups.suggestedFolder)}).
-                </p>
-              )}
-              {backups.settings.autoBackup && (
-                <p className="text-xs text-[var(--muted)]">
-                  {savedAtLabel(backups.settings.lastAutoBackup)
-                    ? `Last saved ${savedAtLabel(backups.settings.lastAutoBackup)}.`
-                    : "No automatic backup yet."}{" "}
-                  Automatic backups have no password, so pick a folder only you can reach.
-                </p>
-              )}
-              {backups.lastError && <p className="text-sm text-red-600 dark:text-red-400">{backups.lastError}</p>}
-            </div>
-          )}
-        </Card>
-
         <Card title="Household">
           <form
             className="grid gap-4"
@@ -186,7 +109,9 @@ export default function Settings() {
         <Card title="Start over">
           <div className="flex items-center justify-between gap-4">
             <p className="text-sm text-[var(--muted)]">
-              Erase every person, account, income, debt, expense, and plan. A safety copy is saved first.
+              {viewingChild
+                ? "Erase everything in this household. A safety copy of the whole family is saved first."
+                : "Erase every person, account, income, debt, expense, and plan, and your children's households. A safety copy is saved first."}
             </p>
             <Button variant="danger" onClick={() => setConfirmErase(true)}>
               Erase all data
@@ -198,7 +123,7 @@ export default function Settings() {
       {confirmErase && (
         <ConfirmDialog
           title="Erase all data?"
-          body="This removes everything you've entered. A safety copy is saved first, which you can open with Open a backup…"
+          body="This removes everything you've entered here. A safety copy is saved first, which you can load from Save & load."
           confirmLabel="Erase"
           danger
           onConfirm={async () => {

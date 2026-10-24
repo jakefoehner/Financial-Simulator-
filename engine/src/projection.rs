@@ -133,6 +133,10 @@ pub struct YearResult {
     /// Gifts this year (cash, down payments, forgiven loan principal), total and per child.
     pub gifts: f64,
     pub gifts_by_child: Vec<ChildAmount>,
+    /// Per child: the money flows a linked child plan receives from this plan.
+    pub transfers_by_child: Vec<ChildTransfer>,
+    /// Money that arrived from a parent's plan this year (gifts, 529s, loans, inheritance).
+    pub received_from_parent: f64,
     /// Gift tax paid this year (only once the lifetime exemption is used up).
     pub gift_tax: f64,
     /// Cash given this year (gifts and down payments; excludes forgiven loan principal).
@@ -175,6 +179,21 @@ pub struct YearResult {
     pub net_worth: f64,
     /// Price level at the end of the year (today = 1.0); divide by it for today's dollars.
     pub price_level: f64,
+}
+
+/// What one child receives from this plan in a year, as a linked child plan needs it
+/// (nominal dollars). Forgiven loan principal isn't here: it shows up as smaller payments.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChildTransfer {
+    pub child_id: Id,
+    pub cash: f64,
+    pub assets: f64,
+    pub assets_basis: f64,
+    pub education: f64,
+    pub paid_for_you: f64,
+    pub loan_in: f64,
+    pub loan_payment: f64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -242,6 +261,98 @@ impl std::fmt::Display for ProjectionError {
             ProjectionError::UnknownScenario => f.write_str("That scenario no longer exists."),
         }
     }
+}
+
+/// How a transfer reaches a child, for a linked child plan.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Via {
+    Cash,
+    Assets,
+    Education,
+    PaidForYou,
+    /// Forgiven loan principal (seen by the child as smaller payments) or a superfund spread:
+    /// counts in the gift ledger only.
+    LedgerOnly,
+}
+
+/// One year's transfers to the children: what each receives (`gifts`), what's reported as a
+/// gift (`reported`: tuition and medical payments aren't gifts, 529 superfunding is spread over
+/// five years, LLC shares are valued at a discount, and a GRAT's remainder was already valued
+/// at about zero when it was set up), and the flows a linked child plan needs (`transfers`).
+#[derive(Default)]
+struct Ledger {
+    gifts: Vec<ChildAmount>,
+    reported: Vec<(Id, f64)>,
+    transfers: Vec<ChildTransfer>,
+}
+
+impl Ledger {
+    fn give(&mut self, to: Id, amount: f64, basis: f64, report: f64, tax_free: f64, via: Via) {
+        if report > 0.0 {
+            match self.reported.iter_mut().find(|r| r.0 == to) {
+                Some(r) => r.1 += report,
+                None => self.reported.push((to, report)),
+            }
+        }
+        if amount <= 0.0 {
+            return;
+        }
+        match self.gifts.iter_mut().find(|g| g.child_id == to) {
+            Some(g) => {
+                g.amount += amount;
+                g.basis += basis;
+                g.tax_free += tax_free;
+            }
+            None => self.gifts.push(ChildAmount { child_id: to, amount, basis, tax_free }),
+        }
+        let t = self.transfer(to);
+        match via {
+            Via::Cash => t.cash += amount,
+            Via::Assets => {
+                t.assets += amount;
+                t.assets_basis += basis;
+            }
+            Via::Education => t.education += amount,
+            Via::PaidForYou => t.paid_for_you += amount,
+            Via::LedgerOnly => {}
+        }
+    }
+
+    fn transfer(&mut self, to: Id) -> &mut ChildTransfer {
+        let i = match self.transfers.iter().position(|t| t.child_id == to) {
+            Some(i) => i,
+            None => {
+                self.transfers.push(ChildTransfer { child_id: to, ..Default::default() });
+                self.transfers.len() - 1
+            }
+        };
+        &mut self.transfers[i]
+    }
+}
+
+/// Index of the first account of `account_type`, adding an empty one (80/20 stocks/bonds)
+/// owned by `owner` if there's none. Used for money arriving from a parent's plan.
+fn holding(accts: &mut Vec<Acct>, account_type: AccountType, owner: &Person) -> usize {
+    if let Some(i) = accts.iter().position(|a| a.account_type == account_type && a.private.is_none()) {
+        return i;
+    }
+    accts.push(Acct {
+        bucket: Bucket::of(account_type),
+        account_type,
+        owner_birth_year: owner.birth_year,
+        owner_id: owner.id,
+        balance: 0.0,
+        basis: 0.0,
+        stocks: 0.8,
+        bonds: 0.2,
+        cash: 0.0,
+        contribution: 0.0,
+        employer_match: 0.0,
+        private: None,
+        llc: None,
+        grat: None,
+    });
+    accts.len() - 1
 }
 
 /// Internal per-account state.
@@ -866,40 +977,17 @@ pub fn project_market(
         }
 
         // --- Scenario decisions: loans, gifts, Roth conversions ---
-        // What each child receives (value, basis, tax-free part), and separately what's reported
-        // as a gift: tuition and medical payments aren't gifts, 529 superfunding is spread over
-        // five years, LLC shares are valued at a discount, and a GRAT's remainder was already
-        // valued (at about zero) when the GRAT was set up.
-        let mut gifts_by_child: Vec<ChildAmount> = Vec::new();
-        let mut reported: Vec<(Id, f64)> = Vec::new();
-        let mut give = |to: Id, amount: f64, basis: f64, report: f64, tax_free: f64| {
-            if report > 0.0 {
-                match reported.iter_mut().find(|r| r.0 == to) {
-                    Some(r) => r.1 += report,
-                    None => reported.push((to, report)),
-                }
-            }
-            if amount <= 0.0 {
-                return;
-            }
-            match gifts_by_child.iter_mut().find(|g| g.child_id == to) {
-                Some(g) => {
-                    g.amount += amount;
-                    g.basis += basis;
-                    g.tax_free += tax_free;
-                }
-                None => gifts_by_child.push(ChildAmount { child_id: to, amount, basis, tax_free }),
-            }
-        };
+        let mut ledger = Ledger::default();
         let (mut loan_interest, mut loan_principal) = (0.0, 0.0);
         for loan in loans.iter_mut() {
             let (i, p, forgiven) = loan.year();
             loan_interest += i;
             loan_principal += p;
-            give(loan.to, forgiven, forgiven, forgiven, 0.0);
+            ledger.give(loan.to, forgiven, forgiven, forgiven, 0.0, Via::LedgerOnly);
+            ledger.transfer(loan.to).loan_payment += i + p;
         }
         for (to, per_year, left) in superfunds.iter_mut() {
-            give(*to, 0.0, 0.0, *per_year, 0.0);
+            ledger.give(*to, 0.0, 0.0, *per_year, 0.0, Via::LedgerOnly);
             *left -= 1;
         }
         superfunds.retain(|s| s.2 > 0);
@@ -918,7 +1006,7 @@ pub fn project_market(
                 grat_remainders += rest;
                 let n = children.len().max(1) as f64;
                 for &id in &children {
-                    give(id, rest / n, rest_basis / n, 0.0, 0.0);
+                    ledger.give(id, rest / n, rest_basis / n, 0.0, 0.0, Via::Assets);
                 }
                 accts[k].grat = None;
             } else {
@@ -955,16 +1043,18 @@ pub fn project_market(
             match e {
                 Event::HomeHelp { to, age, gift, loan } if *age == primary_age => {
                     cash_gifts += gift * price;
-                    give(*to, gift * price, gift * price, gift * price, 0.0);
+                    ledger.give(*to, gift * price, gift * price, gift * price, 0.0, Via::Cash);
                     if let Some(terms) = loan {
                         let l = Loan::new(*to, terms, price);
                         loans_made += l.balance;
+                        ledger.transfer(*to).loan_in += l.balance;
                         loans.push(l);
                     }
                 }
                 Event::FamilyLoan { to, age, loan } if *age == primary_age => {
                     let l = Loan::new(*to, loan, price);
                     loans_made += l.balance;
+                    ledger.transfer(*to).loan_in += l.balance;
                     loans.push(l);
                 }
                 Event::CashGift { to, amount, from_age, years, max_annual_exclusion }
@@ -977,7 +1067,7 @@ pub fn project_market(
                     };
                     for id in recipients {
                         cash_gifts += each;
-                        give(id, each, each, each, 0.0);
+                        ledger.give(id, each, each, each, 0.0, Via::Cash);
                     }
                 }
                 Event::GiftAssets { to, account_id, age, amount } if *age == primary_age => {
@@ -989,7 +1079,7 @@ pub fn project_market(
                         for id in recipients {
                             // The child takes your cost basis on what they receive.
                             let (take, carried) = accts[k].take_in_kind(amount * price);
-                            give(id, take, carried, take, 0.0);
+                            ledger.give(id, take, carried, take, 0.0, Via::Assets);
                         }
                     }
                 }
@@ -1017,7 +1107,7 @@ pub fn project_market(
                     education += v;
                     // Superfunding: up to 5 years of exclusions, counted one-fifth a year.
                     let spread = if *superfund { v.min(5.0 * exclusion) } else { 0.0 };
-                    give(*to, v, v, v - spread + spread / 5.0, v);
+                    ledger.give(*to, v, v, v - spread + spread / 5.0, v, Via::Education);
                     if spread > 0.0 {
                         superfunds.push((*to, spread / 5.0, 4));
                     }
@@ -1025,7 +1115,7 @@ pub fn project_market(
                 Event::PayTuitionMedical { to, amount, from_age, years } if in_years(*from_age, *years) => {
                     let v = amount * price;
                     education += v;
-                    give(*to, v, v, 0.0, 0.0);
+                    ledger.give(*to, v, v, 0.0, 0.0, Via::PaidForYou);
                 }
                 Event::FamilyLlc { account_id, age, amount, discount, gift_share, years } => {
                     if *age == primary_age
@@ -1052,7 +1142,7 @@ pub fn project_market(
                             llc_gifts += v;
                             let n = children.len().max(1) as f64;
                             for &id in &children {
-                                give(id, v / n, basis / n, v * (1.0 - discount) / n, 0.0);
+                                ledger.give(id, v / n, basis / n, v * (1.0 - discount) / n, 0.0, Via::Assets);
                             }
                         }
                     }
@@ -1107,8 +1197,28 @@ pub fn project_market(
         }
 
         // Gift ledger: reported gifts above each child's yearly exclusion use up the lifetime exemption.
-        let gifts: f64 = gifts_by_child.iter().map(|g| g.amount).fold(0.0, f64::add);
-        lifetime_taxable_gifts += reported.iter().map(|r| (r.1 - exclusion).max(0.0)).fold(0.0, f64::add);
+        let gifts: f64 = ledger.gifts.iter().map(|g| g.amount).fold(0.0, f64::add);
+        lifetime_taxable_gifts += ledger.reported.iter().map(|r| (r.1 - exclusion).max(0.0)).fold(0.0, f64::add);
+
+        // --- Money from a parent's plan (a linked child plan) ---
+        // Gifts and inheritance aren't income: cash goes to savings, investments keep the
+        // parent's basis, 529 money goes into a 529, and loan payments go out like a bill.
+        let (mut incoming_cash, mut incoming_out, mut received_from_parent) = (0.0, 0.0, 0.0);
+        for t in h.incoming.iter().filter(|t| t.year == year) {
+            incoming_cash += t.cash + t.loan_in + t.inheritance;
+            incoming_out += t.loan_payment;
+            if t.assets > 0.0 {
+                let k = holding(&mut accts, AccountType::Taxable, primary);
+                accts[k].balance += t.assets;
+                accts[k].basis += t.assets_basis.clamp(0.0, t.assets);
+            }
+            if t.education > 0.0 {
+                let k = holding(&mut accts, AccountType::Plan529, primary);
+                accts[k].balance += t.education;
+                accts[k].basis += t.education;
+            }
+            received_from_parent += t.cash + t.assets + t.education + t.paid_for_you + t.loan_in + t.inheritance;
+        }
         // Gift tax is due only above the exemption, never less than what's already sheltered.
         let shelter = t.estate_exemption(year, index, &r).max(sheltered_gifts);
         let gift_tax = (t.estate_gift.top_rate * (lifetime_taxable_gifts - shelter).max(0.0) - gift_tax_paid).max(0.0);
@@ -1129,7 +1239,8 @@ pub fn project_market(
             + rmd_total
             + loan_interest
             + loan_principal
-            + private_income;
+            + private_income
+            + incoming_cash;
         let base_out = spending
             + one_time
             + debt_payments
@@ -1138,7 +1249,8 @@ pub fn project_market(
             + loans_made
             + gift_tax
             + charity_cash
-            + education;
+            + education
+            + incoming_out;
         let (carry_cash, carry_property) =
             charity_carry.iter().fold((0.0, 0.0), |(c, p), entry| (c + entry.1, p + entry.2));
         let property_tax = h.info.home_property_tax * price;
@@ -1286,7 +1398,9 @@ pub fn project_market(
             saved: if draw.total <= 0.0 { surplus } else { 0.0 },
             shortfall: draw.unmet,
             gifts,
-            gifts_by_child,
+            gifts_by_child: ledger.gifts,
+            transfers_by_child: ledger.transfers,
+            received_from_parent,
             gift_tax,
             cash_gifts,
             loans_made,
@@ -2035,6 +2149,72 @@ mod tests {
         assert!(p.charitable_bequest_real > 0.0);
         close(p.charitable_bequest_real, 0.2 * p.gross_estate_real, 1.0);
         close(base.estate_tax_real - p.estate_tax_real, 0.4 * p.charitable_bequest_real, 1.0);
+    }
+
+    #[test]
+    fn transfers_by_child_record_what_a_linked_child_plan_needs() {
+        let mut h = family(vec![
+            Event::HomeHelp {
+                to: 2,
+                age: 58,
+                gift: 100_000.0,
+                loan: Some(LoanTerms {
+                    amount: 200_000.0,
+                    rate: 0.05,
+                    years: 10,
+                    interest_only: true,
+                    forgive_per_year: 0.0,
+                }),
+            },
+            Event::GiftAssets { to: Some(3), account_id: 1, age: 58, amount: 50_000.0 },
+            Event::Fund529 { to: 3, age: 58, amount: 95_000.0, superfund: true },
+            Event::PayTuitionMedical { to: 2, amount: 30_000.0, from_age: 58, years: 1 },
+        ]);
+        h.accounts[0].id = Some(1);
+        let p = project(&h, Some(1), 2026).unwrap();
+        let t = |year: usize, id: Id| p.years[year].transfers_by_child.iter().find(|t| t.child_id == id).cloned();
+        let sam = t(0, 2).unwrap();
+        close(sam.cash, 100_000.0, 0.01);
+        close(sam.loan_in, 200_000.0, 0.01);
+        close(sam.paid_for_you, 30_000.0, 0.01);
+        let jordan = t(0, 3).unwrap();
+        close(jordan.assets, 50_000.0, 0.01);
+        close(jordan.assets_basis, 50_000.0, 1_000.0);
+        close(jordan.education, 95_000.0, 0.01);
+        // Interest-only loan: Sam pays 5% a year from the next year on.
+        close(t(1, 2).unwrap().loan_payment, 10_000.0, 0.01);
+        assert!(t(1, 3).is_none(), "nothing more for Jordan in year 2");
+    }
+
+    #[test]
+    fn money_from_a_parent_lands_in_the_right_places() {
+        let mut h = household(vec![me(1996)], vec![account(AccountType::Checking, 10_000.0, None, 0.0)], 0.0);
+        let base = project(&h, None, 2026).unwrap();
+        h.incoming = vec![
+            crate::model::IncomingTransfer { year: 2027, cash: 50_000.0, ..Default::default() },
+            crate::model::IncomingTransfer {
+                year: 2028,
+                assets: 100_000.0,
+                assets_basis: 20_000.0,
+                education: 95_000.0,
+                ..Default::default()
+            },
+            crate::model::IncomingTransfer { year: 2030, loan_payment: 5_000.0, ..Default::default() },
+            crate::model::IncomingTransfer { year: 2060, inheritance: 1_000_000.0, ..Default::default() },
+        ];
+        let p = project(&h, None, 2026).unwrap();
+        let at = |p: &Projection, y: i32| p.years.iter().find(|r| r.year == y).unwrap().clone();
+        close(at(&p, 2027).received_from_parent, 50_000.0, 0.01);
+        assert!(at(&p, 2027).balances.cash > at(&base, 2027).balances.cash + 49_000.0);
+        // Gifted investments land in a brokerage account with the parent's basis; the 529 in a 529.
+        let y28 = at(&p, 2028);
+        assert!(y28.balances.taxable > 100_000.0);
+        assert!(y28.balances.education > 95_000.0);
+        // Loan payments are paid out of savings, and gifts aren't taxed as income.
+        assert!(at(&p, 2030).withdrawals > at(&base, 2030).withdrawals);
+        assert_eq!(at(&p, 2027).taxes, at(&base, 2027).taxes);
+        close(at(&p, 2060).received_from_parent, 1_000_000.0, 0.01);
+        assert!(at(&p, 2060).net_worth > at(&base, 2060).net_worth + 1_000_000.0);
     }
 
     #[test]

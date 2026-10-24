@@ -38,13 +38,72 @@ export interface BackupInfo {
   accounts: number;
   income: number;
   debts: number;
+  /** What-if plans in the first household. */
   plans: number;
+  /** Every household in the file; the first is the main one. */
+  households: string[];
 }
 
 export interface BackupPreview {
   needsPassword: boolean;
   info: BackupInfo | null;
 }
+
+/** Mirrors src-tauri/src/family.rs. */
+export interface HouseholdEntry {
+  /** null = your own (main) household. */
+  id: number | null;
+  name: string;
+  active: boolean;
+  linkedPersonId: Id | null;
+  parentPlan: Id | null;
+}
+
+export interface ChildRef {
+  personId: Id;
+  name: string;
+  householdId: number | null;
+}
+
+export interface FamilyOverview {
+  households: HouseholdEntry[];
+  children: ChildRef[];
+}
+
+/** Money arriving in a linked child household from the parent's plan. Totals in today's dollars. */
+export interface IncomingTransfer {
+  year: number;
+  cash: number;
+  assets: number;
+  assetsBasis: number;
+  education: number;
+  paidForYou: number;
+  loanIn: number;
+  loanPayment: number;
+  inheritance: number;
+}
+
+export interface IncomingSummary {
+  parentName: string;
+  childName: string;
+  plan: Id | null;
+  planName: string;
+  plans: { id: Id | null; name: string }[];
+  years: IncomingTransfer[];
+  giftsReal: number;
+  educationReal: number;
+  paidForYouReal: number;
+  loansInReal: number;
+  loanPaymentsReal: number;
+  inheritanceReal: number;
+  inheritanceYear: number | null;
+  parentEstateAge: number;
+  problem: string | null;
+}
+
+/** Where a one-household backup goes. */
+export type LoadTarget =
+  { kind: "everything" } | { kind: "main" } | { kind: "child"; personId: Id } | { kind: "newChild" };
 
 export interface BackupSettings {
   autoBackup: boolean;
@@ -95,10 +154,20 @@ export const api = {
   clearHousehold: () => invoke<Household>("clear_household"),
 
   // Backups (`.fsim`). `password` null or "" = no password.
-  saveBackup: (path: string, password: string | null) => invoke<void>("save_backup", { path, password }),
+  saveBackup: (path: string, password: string | null, scope: "family" | "household") =>
+    invoke<void>("save_backup", { path, password, scope }),
   inspectBackup: (path: string, password: string | null) => invoke<BackupPreview>("inspect_backup", { path, password }),
-  restoreBackup: (path: string, password: string | null) => invoke<Household>("restore_backup", { path, password }),
+  restoreBackup: (path: string, password: string | null, target: LoadTarget | null) =>
+    invoke<Household>("restore_backup", { path, password, target }),
   getBackupSettings: () => invoke<BackupStatus>("get_backup_settings"),
+
+  // Households: yours (id null) and each child's.
+  listHouseholds: () => invoke<FamilyOverview>("list_households"),
+  switchHousehold: (id: number | null) => invoke<Household>("switch_household", { id }),
+  buildChildHousehold: (personId: Id) => invoke<Household>("build_child_household", { personId }),
+  deleteChildHousehold: (id: number) => invoke<Household>("delete_child_household", { id }),
+  setParentPlan: (plan: Id | null) => invoke<void>("set_parent_plan", { plan }),
+  incomingSummary: (startYear: number) => invoke<IncomingSummary | null>("incoming_summary", { startYear }),
   saveBackupSettings: (settings: BackupSettings) => invoke<BackupStatus>("save_backup_settings", { settings }),
 
   upsertPerson: (person: Person) => invoke<Household>("upsert_person", { person }),

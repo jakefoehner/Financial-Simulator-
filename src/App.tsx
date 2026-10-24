@@ -2,6 +2,7 @@ import {
   BookOpen,
   ChartLine,
   CreditCard,
+  FolderInput,
   GitBranch,
   House,
   Landmark,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect } from "react";
 import { BackupDialogs } from "./components/BackupDialogs";
+import { HouseholdSwitcher } from "./components/HouseholdSwitcher";
 import Accounts from "./pages/Accounts";
 import Debts from "./pages/Debts";
 import Guide from "./pages/Guide";
@@ -21,9 +23,10 @@ import Overview from "./pages/Overview";
 import People from "./pages/People";
 import Settings from "./pages/Settings";
 import Results from "./pages/Results";
+import SaveLoad from "./pages/SaveLoad";
 import Scenarios from "./pages/scenarios/Scenarios";
 import Spending from "./pages/Spending";
-import { useApp, type Section } from "./lib/store";
+import { activeHousehold, useApp, type Section } from "./lib/store";
 
 const NAV: { id: Section; label: string; icon: LucideIcon }[][] = [
   [{ id: "overview", label: "Overview", icon: House }],
@@ -39,7 +42,10 @@ const NAV: { id: Section; label: string; icon: LucideIcon }[][] = [
     { id: "scenarios", label: "Scenarios", icon: GitBranch },
     { id: "guide", label: "Giving guide", icon: BookOpen },
   ],
-  [{ id: "settings", label: "Settings", icon: SettingsIcon }],
+  [
+    { id: "data", label: "Save & load", icon: FolderInput },
+    { id: "settings", label: "Settings", icon: SettingsIcon },
+  ],
 ];
 
 const PAGES: Record<Section, () => React.JSX.Element | null> = {
@@ -52,22 +58,26 @@ const PAGES: Record<Section, () => React.JSX.Element | null> = {
   results: Results,
   scenarios: Scenarios,
   guide: Guide,
+  data: SaveLoad,
   settings: Settings,
 };
 
 export default function App() {
-  const { section, go, household, loadError, load } = useApp();
+  const { section, go, household, family, loadError, load, switchHousehold } = useApp();
 
   useEffect(() => {
     void load();
   }, [load]);
 
   const Page = PAGES[section];
+  const active = activeHousehold(family);
+  const main = family?.households[0];
 
   return (
     <div className="flex h-full">
       <nav className="flex w-52 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--sidebar)] px-2 pt-6">
-        <div className="mb-4 px-3 text-sm font-semibold tracking-tight">Finance Simulator</div>
+        <div className="mb-3 px-3 text-sm font-semibold tracking-tight">Finance Simulator</div>
+        <HouseholdSwitcher />
         {NAV.map((group, gi) => (
           <div key={gi} className="mb-3 flex flex-col gap-0.5">
             {group.map((n) => (
@@ -88,6 +98,24 @@ export default function App() {
 
       <main className="flex-1 overflow-y-auto px-10 py-8">
         <div className="mx-auto max-w-5xl">
+          {active && active.id != null && main && (
+            <div className="mb-5 flex items-center justify-between gap-4 rounded-lg bg-accent/10 px-4 py-2 text-sm">
+              <span>
+                <strong className="font-semibold">{active.name}'s household.</strong>{" "}
+                <span className="text-[var(--muted)]">
+                  {active.linkedPersonId != null
+                    ? `Linked to ${main.name}'s plan: gifts and inheritance from it show up in this forecast.`
+                    : "Not linked to anyone's plan."}
+                </span>
+              </span>
+              <button
+                className="shrink-0 font-medium text-accent hover:underline"
+                onClick={() => void switchHousehold(null)}
+              >
+                Back to {main.name}
+              </button>
+            </div>
+          )}
           {loadError ? (
             <p className="text-sm text-red-600 dark:text-red-400">Couldn't open your data: {loadError}</p>
           ) : !household ? null : (

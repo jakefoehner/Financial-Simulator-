@@ -23,6 +23,7 @@ pub fn load_household(conn: &Connection) -> Result<Household> {
         one_time_expenses: list_one_time_expenses(conn)?,
         assumptions: get_assumptions(conn)?,
         scenarios: list_scenarios(conn)?,
+        incoming: Vec::new(),
     })
 }
 

@@ -1,0 +1,591 @@
+{
+  "format": "finance-simulator-backup",
+  "formatVersion": 2,
+  "appVersion": "0.5.0",
+  "savedAt": "2026-10-24T14:30:00-05:00",
+  "households": [
+    {
+      "household": {
+        "accounts": [
+          {
+            "accountType": "taxable",
+            "annualContribution": 0.0,
+            "balance": 9400000.0,
+            "bondsPct": 0.3,
+            "cashPct": 0.05,
+            "costBasis": 3800000.0,
+            "employerMatch": 0.0,
+            "id": 1,
+            "name": "Taxable brokerage",
+            "notes": "",
+            "ownerId": 1,
+            "private": null,
+            "stocksPct": 0.65
+          },
+          {
+            "accountType": "trad_ira",
+            "annualContribution": 0.0,
+            "balance": 3200000.0,
+            "bondsPct": 0.4,
+            "cashPct": 0.05,
+            "costBasis": null,
+            "employerMatch": 0.0,
+            "id": 2,
+            "name": "Traditional IRA",
+            "notes": "Rolled over from 401(k)",
+            "ownerId": 1,
+            "private": null,
+            "stocksPct": 0.55
+          },
+          {
+            "accountType": "roth_ira",
+            "annualContribution": 0.0,
+            "balance": 650000.0,
+            "bondsPct": 0.15,
+            "cashPct": 0.0,
+            "costBasis": null,
+            "employerMatch": 0.0,
+            "id": 3,
+            "name": "Roth IRA",
+            "notes": "",
+            "ownerId": 1,
+            "private": null,
+            "stocksPct": 0.85
+          },
+          {
+            "accountType": "checking",
+            "annualContribution": 0.0,
+            "balance": 150000.0,
+            "bondsPct": 0.0,
+            "cashPct": 1.0,
+            "costBasis": null,
+            "employerMatch": 0.0,
+            "id": 4,
+            "name": "Checking",
+            "notes": "",
+            "ownerId": 1,
+            "private": null,
+            "stocksPct": 0.0
+          },
+          {
+            "accountType": "savings",
+            "annualContribution": 0.0,
+            "balance": 450000.0,
+            "bondsPct": 0.0,
+            "cashPct": 1.0,
+            "costBasis": null,
+            "employerMatch": 0.0,
+            "id": 5,
+            "name": "High-yield savings",
+            "notes": "",
+            "ownerId": 1,
+            "private": null,
+            "stocksPct": 0.0
+          },
+          {
+            "accountType": "real_estate",
+            "annualContribution": 0.0,
+            "balance": 1600000.0,
+            "bondsPct": 0.0,
+            "cashPct": 0.0,
+            "costBasis": 700000.0,
+            "employerMatch": 0.0,
+            "id": 6,
+            "name": "Home",
+            "notes": "Primary residence",
+            "ownerId": 1,
+            "private": null,
+            "stocksPct": 0.0
+          },
+          {
+            "accountType": "real_estate",
+            "annualContribution": 0.0,
+            "balance": 1100000.0,
+            "bondsPct": 0.0,
+            "cashPct": 0.0,
+            "costBasis": 600000.0,
+            "employerMatch": 0.0,
+            "id": 7,
+            "name": "Rental property",
+            "notes": "",
+            "ownerId": 1,
+            "private": null,
+            "stocksPct": 0.0
+          },
+          {
+            "accountType": "real_estate_fund",
+            "annualContribution": 0.0,
+            "balance": 1050000.0,
+            "bondsPct": 0.0,
+            "cashPct": 0.0,
+            "costBasis": 1000000.0,
+            "employerMatch": 0.0,
+            "id": 8,
+            "name": "Multifamily real estate fund",
+            "notes": "",
+            "ownerId": 1,
+            "private": {
+              "cashYield": 0.08,
+              "companies": 1,
+              "exitMultiple": 1.5,
+              "exitYear": 2031,
+              "qsbs": false,
+              "taxableShare": 0.5
+            },
+            "stocksPct": 0.0
+          },
+          {
+            "accountType": "private_credit",
+            "annualContribution": 0.0,
+            "balance": 500000.0,
+            "bondsPct": 0.0,
+            "cashPct": 0.0,
+            "costBasis": 500000.0,
+            "employerMatch": 0.0,
+            "id": 9,
+            "name": "Private credit fund",
+            "notes": "",
+            "ownerId": 1,
+            "private": {
+              "cashYield": 0.085,
+              "companies": 1,
+              "exitMultiple": 1.0,
+              "exitYear": 2030,
+              "qsbs": false,
+              "taxableShare": 1.0
+            },
+            "stocksPct": 0.0
+          },
+          {
+            "accountType": "startup",
+            "annualContribution": 0.0,
+            "balance": 300000.0,
+            "bondsPct": 0.0,
+            "cashPct": 0.0,
+            "costBasis": 300000.0,
+            "employerMatch": 0.0,
+            "id": 10,
+            "name": "Startup investments",
+            "notes": "",
+            "ownerId": 1,
+            "private": {
+              "cashYield": 0.0,
+              "companies": 6,
+              "exitMultiple": 2.0,
+              "exitYear": 2034,
+              "qsbs": true,
+              "taxableShare": 1.0
+            },
+            "stocksPct": 0.0
+          }
+        ],
+        "assumptions": {
+          "bondsReturn": 0.04,
+          "capitalGainsIncrease": 0.05,
+          "cashReturn": 0.02,
+          "estateAge": null,
+          "exemptionCutAmount": 7000000.0,
+          "exemptionCutEnabled": false,
+          "exemptionCutYear": 2030,
+          "heirCapitalGainsRate": 0.15,
+          "heirIncomeTaxRate": 0.24,
+          "incomeTaxIncrease": 0.05,
+          "inflation": 0.025,
+          "realEstateGrowth": 0.03,
+          "simulations": 5000,
+          "steadyInflation": false,
+          "stockDividendYield": 0.015,
+          "stocksReturn": 0.07,
+          "taxRiseEnabled": false,
+          "taxRiseYear": 2030
+        },
+        "debts": [
+          {
+            "accountId": 7,
+            "balance": 300000.0,
+            "homeMortgage": false,
+            "id": 1,
+            "interestRate": 0.03125,
+            "kind": "mortgage",
+            "monthlyPayment": 2300.0,
+            "name": "Rental mortgage",
+            "notes": ""
+          }
+        ],
+        "income": [
+          {
+            "annualAmount": 70000.0,
+            "endAge": null,
+            "growthRate": 0.025,
+            "id": 1,
+            "kind": "rental",
+            "name": "Rental income (after expenses)",
+            "personId": 1,
+            "startAge": null
+          }
+        ],
+        "info": {
+          "baseAnnualSpending": 300000.0,
+          "filingStatus": "single",
+          "flatStateRate": 0.0,
+          "homePropertyTax": 30000.0,
+          "name": "Demo: Retired in Texas",
+          "state": "TX"
+        },
+        "oneTimeExpenses": [
+          {
+            "amount": 45000.0,
+            "id": 1,
+            "name": "Roof replacement",
+            "year": 2027
+          },
+          {
+            "amount": 80000.0,
+            "id": 2,
+            "name": "New car",
+            "year": 2028
+          }
+        ],
+        "people": [
+          {
+            "birthYear": 1968,
+            "id": 1,
+            "lifeExpectancy": 100,
+            "name": "Pat",
+            "role": "primary",
+            "ssAlreadyClaiming": false,
+            "ssClaimAge": 67,
+            "ssMonthlyBenefit": 3600.0
+          },
+          {
+            "birthYear": 1995,
+            "id": 2,
+            "lifeExpectancy": 100,
+            "name": "Sam",
+            "role": "child",
+            "ssAlreadyClaiming": false,
+            "ssClaimAge": 67,
+            "ssMonthlyBenefit": null
+          },
+          {
+            "birthYear": 1998,
+            "id": 3,
+            "lifeExpectancy": 100,
+            "name": "Jordan",
+            "role": "child",
+            "ssAlreadyClaiming": false,
+            "ssClaimAge": 67,
+            "ssMonthlyBenefit": null
+          }
+        ],
+        "scenarios": [
+          {
+            "events": [
+              {
+                "age": 59,
+                "gift": 150000.0,
+                "loan": null,
+                "to": 2,
+                "type": "home_help"
+              }
+            ],
+            "id": 1,
+            "name": "Help Sam with a down payment",
+            "notes": "A one-time gift toward Sam's first home."
+          },
+          {
+            "events": [
+              {
+                "amount": 0.0,
+                "fromAge": 59,
+                "maxAnnualExclusion": true,
+                "to": null,
+                "type": "cash_gift",
+                "years": 20
+              }
+            ],
+            "id": 2,
+            "name": "Yearly gifts to both kids",
+            "notes": "The yearly gift-tax exclusion to each child for 20 years."
+          },
+          {
+            "events": [
+              {
+                "age": 60,
+                "gift": 100000.0,
+                "loan": {
+                  "amount": 400000.0,
+                  "forgivePerYear": 19000.0,
+                  "interestOnly": false,
+                  "rate": 0.0552,
+                  "years": 15
+                },
+                "to": 3,
+                "type": "home_help"
+              }
+            ],
+            "id": 3,
+            "name": "Family loan to Jordan",
+            "notes": "A down payment plus a 15-year loan at the IRS minimum rate, forgiving the yearly exclusion."
+          },
+          {
+            "events": [
+              {
+                "accountId": 1,
+                "age": 59,
+                "amount": 1000000.0,
+                "to": null,
+                "type": "gift_assets"
+              }
+            ],
+            "id": 4,
+            "name": "Give each kid $1M of stock",
+            "notes": "Shares from the brokerage account; the kids keep your cost basis."
+          },
+          {
+            "events": [
+              {
+                "amount": 2500000.0,
+                "fromAge": 59,
+                "maxAnnualExclusion": false,
+                "to": null,
+                "type": "cash_gift",
+                "years": 1
+              }
+            ],
+            "id": 5,
+            "name": "Big gift now: $2.5M to each kid",
+            "notes": "Locks in $5M of the lifetime exemption in case it's cut later."
+          },
+          {
+            "events": [
+              {
+                "accountId": 1,
+                "amount": 200000.0,
+                "donorAdvised": true,
+                "fromAge": 59,
+                "type": "charity_gift",
+                "years": 5
+              },
+              {
+                "fromIraFirst": true,
+                "share": 0.1,
+                "type": "charitable_bequest"
+              }
+            ],
+            "id": 6,
+            "name": "Charity: stock to a donor-advised fund",
+            "notes": "$200K a year of appreciated stock to a donor-advised fund for five years, and 10% of the estate to charity from the IRA."
+          },
+          {
+            "events": [
+              {
+                "age": 59,
+                "amount": 95000.0,
+                "superfund": true,
+                "to": 2,
+                "type": "fund529"
+              },
+              {
+                "age": 59,
+                "amount": 95000.0,
+                "superfund": true,
+                "to": 3,
+                "type": "fund529"
+              },
+              {
+                "amount": 70000.0,
+                "fromAge": 59,
+                "to": 3,
+                "type": "pay_tuition_medical",
+                "years": 2
+              }
+            ],
+            "id": 7,
+            "name": "529s and tuition",
+            "notes": "A superfunded 529 for each kid, plus Jordan's grad-school tuition paid directly."
+          },
+          {
+            "events": [
+              {
+                "accountId": 1,
+                "age": 59,
+                "amount": 4000000.0,
+                "discount": 0.3,
+                "giftShare": 0.1,
+                "type": "family_llc",
+                "years": 10
+              }
+            ],
+            "id": 8,
+            "name": "Family LLC",
+            "notes": "$4M of brokerage investments in a family LLC; 10% of it to the kids each year for 10 years at a 30% discount."
+          },
+          {
+            "events": [
+              {
+                "accountId": 1,
+                "age": 59,
+                "amount": 3000000.0,
+                "rolling": true,
+                "termYears": 2,
+                "type": "grat",
+                "untilAge": 70
+              }
+            ],
+            "id": 9,
+            "name": "Rolling GRATs",
+            "notes": "$3M of brokerage stock in 2-year GRATs, rolled until 70. Look at strong markets: that's where GRATs pay off."
+          }
+        ]
+      },
+      "linkedTo": null,
+      "name": "Pat"
+    },
+    {
+      "household": {
+        "accounts": [
+          {
+            "accountType": "trad_401k",
+            "annualContribution": 15000.0,
+            "balance": 92000.0,
+            "bondsPct": 0.1,
+            "cashPct": 0.0,
+            "costBasis": null,
+            "employerMatch": 6000.0,
+            "id": 1,
+            "name": "401(k)",
+            "notes": "",
+            "ownerId": 1,
+            "private": null,
+            "stocksPct": 0.9
+          },
+          {
+            "accountType": "roth_ira",
+            "annualContribution": 7000.0,
+            "balance": 34000.0,
+            "bondsPct": 0.0,
+            "cashPct": 0.0,
+            "costBasis": null,
+            "employerMatch": 0.0,
+            "id": 2,
+            "name": "Roth IRA",
+            "notes": "",
+            "ownerId": 1,
+            "private": null,
+            "stocksPct": 1.0
+          },
+          {
+            "accountType": "checking",
+            "annualContribution": 0.0,
+            "balance": 18000.0,
+            "bondsPct": 0.0,
+            "cashPct": 1.0,
+            "costBasis": null,
+            "employerMatch": 0.0,
+            "id": 3,
+            "name": "Checking",
+            "notes": "",
+            "ownerId": 1,
+            "private": null,
+            "stocksPct": 0.0
+          },
+          {
+            "accountType": "taxable",
+            "annualContribution": 2400.0,
+            "balance": 21000.0,
+            "bondsPct": 0.0,
+            "cashPct": 0.0,
+            "costBasis": 16000.0,
+            "employerMatch": 0.0,
+            "id": 4,
+            "name": "Brokerage",
+            "notes": "",
+            "ownerId": 1,
+            "private": null,
+            "stocksPct": 1.0
+          }
+        ],
+        "assumptions": {
+          "bondsReturn": 0.04,
+          "capitalGainsIncrease": 0.05,
+          "cashReturn": 0.02,
+          "estateAge": null,
+          "exemptionCutAmount": 7000000.0,
+          "exemptionCutEnabled": false,
+          "exemptionCutYear": 2030,
+          "heirCapitalGainsRate": 0.15,
+          "heirIncomeTaxRate": 0.24,
+          "incomeTaxIncrease": 0.05,
+          "inflation": 0.025,
+          "realEstateGrowth": 0.03,
+          "simulations": 5000,
+          "steadyInflation": false,
+          "stockDividendYield": 0.015,
+          "stocksReturn": 0.07,
+          "taxRiseEnabled": false,
+          "taxRiseYear": 2030
+        },
+        "debts": [
+          {
+            "accountId": null,
+            "balance": 22000.0,
+            "homeMortgage": false,
+            "id": 1,
+            "interestRate": 0.05,
+            "kind": "student_loan",
+            "monthlyPayment": 280.0,
+            "name": "Student loans",
+            "notes": ""
+          }
+        ],
+        "income": [
+          {
+            "annualAmount": 118000.0,
+            "endAge": 65,
+            "growthRate": 0.035,
+            "id": 1,
+            "kind": "w2",
+            "name": "Salary",
+            "personId": 1,
+            "startAge": null
+          }
+        ],
+        "info": {
+          "baseAnnualSpending": 68000.0,
+          "filingStatus": "single",
+          "flatStateRate": 0.0,
+          "homePropertyTax": 0.0,
+          "name": "Demo: Sam",
+          "state": "TX"
+        },
+        "oneTimeExpenses": [
+          {
+            "amount": 160000.0,
+            "id": 1,
+            "name": "First home: down payment and closing",
+            "year": 2028
+          }
+        ],
+        "people": [
+          {
+            "birthYear": 1995,
+            "id": 1,
+            "lifeExpectancy": 100,
+            "name": "Sam",
+            "role": "primary",
+            "ssAlreadyClaiming": false,
+            "ssClaimAge": 67,
+            "ssMonthlyBenefit": 2900.0
+          }
+        ],
+        "scenarios": []
+      },
+      "linkedTo": {
+        "personId": 2,
+        "plan": null
+      },
+      "name": "Sam"
+    }
+  ]
+}

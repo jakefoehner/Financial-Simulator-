@@ -14,6 +14,7 @@ const info: BackupInfo = {
   income: 1,
   debts: 1,
   plans: 9,
+  households: ["Pat"],
 };
 
 describe("backup helpers", () => {

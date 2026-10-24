@@ -4,6 +4,7 @@ import type { DollarMode } from "../lib/projection";
 import { useApp } from "../lib/store";
 import { currentYear } from "../lib/types";
 import AssumptionsCard from "./forecast/AssumptionsCard";
+import FromParentCard from "./forecast/FromParentCard";
 import RangeView from "./forecast/RangeView";
 import { DollarToggle, Segmented } from "./forecast/shared";
 import SteadyPath from "./forecast/SteadyPath";
@@ -78,6 +79,7 @@ export default function Results() {
         }
       />
       <div className="grid gap-5">
+        <FromParentCard household={household} startYear={startYear} />
         {view === "range" ? (
           <RangeView household={household} startYear={startYear} mode={mode} plan={plan} onError={onError} />
         ) : (

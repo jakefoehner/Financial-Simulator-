@@ -1,6 +1,7 @@
 mod backup;
 mod db;
 mod demo;
+mod family;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -12,8 +13,9 @@ use engine::model::{
 use engine::montecarlo::{self, ScenarioDetail, Simulation};
 use engine::projection::{self, ClaimAgeOutcome, Projection};
 use engine::solver::{self, SafeGiftRequest, SafeGiftResult};
+use family::{ChildRef, Family, HouseholdEntry, IncomingSummary, LoadTarget};
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -21,8 +23,8 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager, RunEvent, State};
 
 struct AppState {
-    conn: Mutex<Connection>,
-    db_path: PathBuf,
+    /// Your household plus any child households; edits go to the one being viewed.
+    family: Mutex<Family>,
     /// Safety copies go here when automatic backups are off.
     app_data_dir: PathBuf,
     auto: Mutex<AutoBackup>,
@@ -50,26 +52,26 @@ fn now_stamps() -> (String, String) {
     (now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false), now.format("%Y-%m-%d %H-%M-%S").to_string())
 }
 
-/// Writes a dated, unencrypted backup of the stored household into `folder` (keeping the newest 10).
-fn write_dated_backup(conn: &Connection, folder: &Path) -> Result<PathBuf, String> {
-    let h = db::load_household(conn).map_err(err)?;
+/// Writes a dated, unencrypted backup of the whole family into `folder` (keeping the newest 10).
+fn write_dated_backup(fam: &Family, folder: &Path) -> Result<PathBuf, String> {
+    let all = fam.export_all().map_err(err)?;
     let (at, stamp) = now_stamps();
-    let path = backup::write_auto(folder, &backup::encode(&h, None, APP_VERSION, &at), &stamp)
+    let path = backup::write_auto(folder, &backup::encode(&all, None, APP_VERSION, &at), &stamp)
         .map_err(|e| format!("Couldn't write an automatic backup to {}: {e}", folder.display()))?;
-    db::record_auto_backup(conn, &at).map_err(err)?;
+    db::record_auto_backup(fam.main(), &at).map_err(err)?;
     Ok(path)
 }
 
 /// Writes an automatic backup if they're turned on and one is due (`force`: write now if anything changed).
-fn auto_backup(state: &AppState, conn: &Connection, force: bool) {
-    let Ok(settings) = db::get_backup_settings(conn) else { return };
+fn auto_backup(state: &AppState, fam: &Family, force: bool) {
+    let Ok(settings) = db::get_backup_settings(fam.main()) else { return };
     let (true, Some(folder)) = (settings.auto_backup, settings.backup_folder) else { return };
     let Ok(mut auto) = state.auto.lock() else { return };
     let due = auto.dirty && (force || auto.last_written.is_none_or(|t| t.elapsed() >= AUTO_BACKUP_INTERVAL));
     if !due {
         return;
     }
-    match write_dated_backup(conn, Path::new(&folder)) {
+    match write_dated_backup(fam, Path::new(&folder)) {
         Ok(_) => {
             auto.last_written = Some(Instant::now());
             auto.dirty = false;
@@ -79,19 +81,19 @@ fn auto_backup(state: &AppState, conn: &Connection, force: bool) {
     }
 }
 
-/// Before replacing everything (restore, demo, clear): save what's there now, to the backup
+/// Before replacing or erasing data: save the whole family as it is now, to the backup
 /// folder if automatic backups are on, else to "Safety copies" in the app's data folder.
-fn safety_copy(state: &AppState, conn: &Connection) -> Result<(), String> {
-    let h = db::load_household(conn).map_err(err)?;
-    if h.people.is_empty() && h.accounts.is_empty() {
+fn safety_copy(state: &AppState, fam: &Family) -> Result<(), String> {
+    let all = fam.export_all().map_err(err)?;
+    if all.len() == 1 && all[0].household.people.is_empty() && all[0].household.accounts.is_empty() {
         return Ok(());
     }
-    let settings = db::get_backup_settings(conn).map_err(err)?;
+    let settings = db::get_backup_settings(fam.main()).map_err(err)?;
     let folder = match (settings.auto_backup, settings.backup_folder) {
         (true, Some(f)) => PathBuf::from(f),
         _ => state.app_data_dir.join("Safety copies"),
     };
-    write_dated_backup(conn, &folder).map(drop)
+    write_dated_backup(fam, &folder).map(drop)
 }
 
 fn cache_key(h: &Household, scenario: Option<Id>, start_year: i32) -> u64 {
@@ -109,27 +111,92 @@ fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
-/// Runs `f` with the DB connection, then returns the freshly loaded household,
-/// so the UI always renders exactly what's stored.
-fn mutate(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> db::Result<()>) -> CmdResult<Household> {
-    let mut conn = state.conn.lock().map_err(err)?;
-    f(&mut conn).map_err(err)?;
+fn note_change(state: &AppState, fam: &Family) {
     if let Ok(mut auto) = state.auto.lock() {
         auto.dirty = true;
     }
-    auto_backup(state, &conn, false);
-    db::load_household(&conn).map_err(err)
+    auto_backup(state, fam, false);
 }
 
-/// Like `mutate`, for changes that replace all data: keeps a safety copy first.
-fn replace_all(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> db::Result<()>) -> CmdResult<Household> {
-    {
-        let conn = state.conn.lock().map_err(err)?;
-        safety_copy(state, &conn)
-            .map_err(|e| format!("Nothing was changed: couldn't save a safety copy first. {e}"))?;
-    }
-    mutate(state, f)
+/// Runs `f` on the household being viewed, then returns it freshly loaded,
+/// so the UI always renders exactly what's stored.
+fn mutate(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> db::Result<()>) -> CmdResult<Household> {
+    let mut fam = state.family.lock().map_err(err)?;
+    f(fam.conn()).map_err(err)?;
+    note_change(state, &fam);
+    db::load_household(fam.conn_ref()).map_err(err)
 }
+
+/// For changes that replace or erase data: keeps a safety copy of the whole family first.
+fn replace_all(state: &State<AppState>, f: impl FnOnce(&mut Family) -> db::Result<()>) -> CmdResult<Household> {
+    let mut fam = state.family.lock().map_err(err)?;
+    safety_copy(state, &fam).map_err(|e| format!("Nothing was changed: couldn't save a safety copy first. {e}"))?;
+    f(&mut fam).map_err(err)?;
+    note_change(state, &fam);
+    db::load_household(fam.conn_ref()).map_err(err)
+}
+
+/// The household being viewed, ready for the engine (with money from a linked parent plan).
+fn engine_household(state: &AppState, start_year: i32) -> CmdResult<Household> {
+    state.family.lock().map_err(err)?.household_for_engine(start_year).map_err(err)
+}
+
+// --- Households (yours and your children's) ---------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FamilyOverview {
+    /// Yours first, then each child household.
+    households: Vec<HouseholdEntry>,
+    /// The children listed in your household.
+    children: Vec<ChildRef>,
+}
+
+#[tauri::command]
+fn list_households(state: State<AppState>) -> CmdResult<FamilyOverview> {
+    let fam = state.family.lock().map_err(err)?;
+    Ok(FamilyOverview { households: fam.list().map_err(err)?, children: fam.children().map_err(err)? })
+}
+
+/// View another household (`None` = yours).
+#[tauri::command]
+fn switch_household(state: State<AppState>, id: Option<i64>) -> CmdResult<Household> {
+    let mut fam = state.family.lock().map_err(err)?;
+    fam.switch(id).map_err(err)?;
+    db::load_household(fam.conn_ref()).map_err(err)
+}
+
+/// Starts (or opens) the household of a child listed in yours, and views it.
+#[tauri::command]
+fn build_child_household(state: State<AppState>, person_id: Id) -> CmdResult<Household> {
+    let mut fam = state.family.lock().map_err(err)?;
+    let id = fam.build_child(person_id).map_err(err)?;
+    fam.switch(Some(id)).map_err(err)?;
+    note_change(&state, &fam);
+    db::load_household(fam.conn_ref()).map_err(err)
+}
+
+/// Deletes a child household (after a safety copy) and returns to yours if it was open.
+#[tauri::command]
+fn delete_child_household(state: State<AppState>, id: i64) -> CmdResult<Household> {
+    replace_all(&state, |fam| fam.delete(id))
+}
+
+/// Which of your plans feeds the child household being viewed (`None` = base plan).
+#[tauri::command]
+fn set_parent_plan(state: State<AppState>, plan: Option<Id>) -> CmdResult<()> {
+    let mut fam = state.family.lock().map_err(err)?;
+    let id = fam.active_id().ok_or("Open a child's household first.")?;
+    fam.set_parent_plan(id, plan).map_err(err)
+}
+
+/// What arrives from your plan, when viewing a linked child household.
+#[tauri::command]
+fn incoming_summary(state: State<AppState>, start_year: i32) -> CmdResult<Option<IncomingSummary>> {
+    state.family.lock().map_err(err)?.incoming_summary(start_year).map_err(err)
+}
+
+// --- Backups -------------------------------------------------------------------
 
 /// Adds ".fsim" when the name has no extension.
 fn with_extension(path: &str) -> PathBuf {
@@ -137,12 +204,24 @@ fn with_extension(path: &str) -> PathBuf {
     if p.extension().is_some() { p } else { p.with_extension(backup::EXTENSION) }
 }
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum SaveScope {
+    /// Every household (yours and the children's).
+    Family,
+    /// Just the household being viewed.
+    Household,
+}
+
 #[tauri::command]
-fn save_backup(state: State<AppState>, path: String, password: Option<String>) -> CmdResult<()> {
-    let conn = state.conn.lock().map_err(err)?;
-    let h = db::load_household(&conn).map_err(err)?;
+fn save_backup(state: State<AppState>, path: String, password: Option<String>, scope: SaveScope) -> CmdResult<()> {
+    let fam = state.family.lock().map_err(err)?;
+    let households = match scope {
+        SaveScope::Family => fam.export_all().map_err(err)?,
+        SaveScope::Household => vec![fam.export_active().map_err(err)?],
+    };
     let (at, _) = now_stamps();
-    let bytes = backup::encode(&h, password.as_deref(), APP_VERSION, &at);
+    let bytes = backup::encode(&households, password.as_deref(), APP_VERSION, &at);
     backup::write_atomic(&with_extension(&path), &bytes).map_err(|e| format!("Couldn't save the backup: {e}"))
 }
 
@@ -168,12 +247,24 @@ fn inspect_backup(path: String, password: Option<String>) -> CmdResult<BackupPre
     }
 }
 
-/// Replaces all data with the backup's, after saving a safety copy of the current data.
+/// Loads a backup after a safety copy. A family file (several households) replaces
+/// everything; a one-household file goes where `target` says. Then views what was loaded.
 #[tauri::command]
-fn restore_backup(state: State<AppState>, path: String, password: Option<String>) -> CmdResult<Household> {
+fn restore_backup(
+    state: State<AppState>,
+    path: String,
+    password: Option<String>,
+    target: Option<LoadTarget>,
+) -> CmdResult<Household> {
     let bytes = read_backup_file(&path)?;
-    let (h, _) = backup::decode(&bytes, password.as_deref()).map_err(err)?;
-    replace_all(&state, |c| db::replace_household(c, &h))
+    let (households, _) = backup::decode(&bytes, password.as_deref()).map_err(err)?;
+    replace_all(&state, |fam| {
+        if households.len() > 1 {
+            return fam.import_all(&households);
+        }
+        let view = fam.import_one(&households[0], target.unwrap_or(LoadTarget::Everything))?;
+        fam.switch(view)
+    })
 }
 
 #[derive(Serialize)]
@@ -186,14 +277,14 @@ struct BackupStatus {
     suggested_folder: String,
 }
 
-fn backup_status(app: &tauri::AppHandle, state: &AppState, conn: &Connection) -> CmdResult<BackupStatus> {
+fn backup_status(app: &tauri::AppHandle, state: &AppState, fam: &Family) -> CmdResult<BackupStatus> {
     let suggested = app
         .path()
         .document_dir()
         .map(|d| d.join("Finance Simulator backups").display().to_string())
         .unwrap_or_default();
     Ok(BackupStatus {
-        settings: db::get_backup_settings(conn).map_err(err)?,
+        settings: db::get_backup_settings(fam.main()).map_err(err)?,
         last_error: state.auto.lock().ok().and_then(|a| a.last_error.clone()),
         suggested_folder: suggested,
     })
@@ -201,8 +292,8 @@ fn backup_status(app: &tauri::AppHandle, state: &AppState, conn: &Connection) ->
 
 #[tauri::command]
 fn get_backup_settings(app: tauri::AppHandle, state: State<AppState>) -> CmdResult<BackupStatus> {
-    let conn = state.conn.lock().map_err(err)?;
-    backup_status(&app, &state, &conn)
+    let fam = state.family.lock().map_err(err)?;
+    backup_status(&app, &state, &fam)
 }
 
 /// Saves the automatic-backup switch and folder; turning it on writes one right away.
@@ -212,15 +303,15 @@ fn save_backup_settings(
     state: State<AppState>,
     settings: db::BackupSettings,
 ) -> CmdResult<BackupStatus> {
-    let conn = state.conn.lock().map_err(err)?;
-    db::save_backup_settings(&conn, &settings).map_err(err)?;
+    let fam = state.family.lock().map_err(err)?;
+    db::save_backup_settings(fam.main(), &settings).map_err(err)?;
     if settings.auto_backup {
         if let Ok(mut auto) = state.auto.lock() {
             auto.dirty = true;
         }
-        auto_backup(&state, &conn, true);
+        auto_backup(&state, &fam, true);
     }
-    backup_status(&app, &state, &conn)
+    backup_status(&app, &state, &fam)
 }
 
 #[derive(Serialize)]
@@ -234,19 +325,19 @@ struct AppInfo {
 
 #[tauri::command]
 fn app_info(app: tauri::AppHandle, state: State<AppState>) -> CmdResult<AppInfo> {
-    let conn = state.conn.lock().map_err(err)?;
+    let fam = state.family.lock().map_err(err)?;
     Ok(AppInfo {
         app_version: app.package_info().version.to_string(),
         engine_version: engine::VERSION.to_string(),
-        db_path: state.db_path.display().to_string(),
-        schema_version: db::schema_version(&conn).map_err(err)?,
+        db_path: fam.main_path().display().to_string(),
+        schema_version: db::schema_version(fam.main()).map_err(err)?,
     })
 }
 
 #[tauri::command]
 fn get_household(state: State<AppState>) -> CmdResult<Household> {
-    let conn = state.conn.lock().map_err(err)?;
-    db::load_household(&conn).map_err(err)
+    let fam = state.family.lock().map_err(err)?;
+    db::load_household(fam.conn_ref()).map_err(err)
 }
 
 #[tauri::command]
@@ -302,7 +393,7 @@ fn delete_scenario(state: State<AppState>, id: Id) -> CmdResult<Household> {
 /// `scenario` is a plan id; `None` is the base plan.
 #[tauri::command]
 fn run_projection(state: State<AppState>, start_year: i32, scenario: Option<Id>) -> CmdResult<Projection> {
-    let household = get_household(state)?;
+    let household = engine_household(&state, start_year)?;
     projection::project(&household, scenario, start_year).map_err(err)
 }
 
@@ -312,7 +403,7 @@ fn compare_claim_ages(
     start_year: i32,
     scenario: Option<Id>,
 ) -> CmdResult<Vec<ClaimAgeOutcome>> {
-    let household = get_household(state)?;
+    let household = engine_household(&state, start_year)?;
     projection::compare_claim_ages(&household, scenario, start_year).map_err(err)
 }
 
@@ -323,10 +414,7 @@ async fn run_simulation(
     start_year: i32,
     scenario: Option<Id>,
 ) -> CmdResult<Arc<Simulation>> {
-    let household = {
-        let conn = state.conn.lock().map_err(err)?;
-        db::load_household(&conn).map_err(err)?
-    };
+    let household = engine_household(&state, start_year)?;
     let key = cache_key(&household, scenario, start_year);
     if let Some((_, sim)) = state.simulation_cache.lock().map_err(err)?.iter().find(|(k, _)| *k == key) {
         return Ok(sim.clone());
@@ -349,10 +437,7 @@ async fn scenario_detail(
     path_index: usize,
     scenario: Option<Id>,
 ) -> CmdResult<ScenarioDetail> {
-    let household = {
-        let conn = state.conn.lock().map_err(err)?;
-        db::load_household(&conn).map_err(err)?
-    };
+    let household = engine_household(&state, start_year)?;
     tauri::async_runtime::spawn_blocking(move || {
         montecarlo::scenario_detail(&household, scenario, start_year, path_index)
     })
@@ -369,10 +454,7 @@ async fn safe_gift(
     scenario: Option<Id>,
     request: SafeGiftRequest,
 ) -> CmdResult<SafeGiftResult> {
-    let household = {
-        let conn = state.conn.lock().map_err(err)?;
-        db::load_household(&conn).map_err(err)?
-    };
+    let household = engine_household(&state, start_year)?;
     tauri::async_runtime::spawn_blocking(move || solver::safe_gift(&household, scenario, start_year, request))
         .await
         .map_err(err)?
@@ -381,12 +463,13 @@ async fn safe_gift(
 
 #[tauri::command]
 fn load_demo(state: State<AppState>, which: demo::Demo) -> CmdResult<Household> {
-    replace_all(&state, |c| db::replace_household(c, &demo::household(which)))
+    replace_all(&state, |fam| fam.import_all(&demo::family(which)))
 }
 
 #[tauri::command]
+/// Erases the household being viewed (yours also removes the children's), after a safety copy.
 fn clear_household(state: State<AppState>) -> CmdResult<Household> {
-    replace_all(&state, db::clear_household)
+    replace_all(&state, Family::clear)
 }
 
 #[tauri::command]
@@ -396,7 +479,13 @@ fn upsert_person(state: State<AppState>, person: Person) -> CmdResult<Household>
 
 #[tauri::command]
 fn delete_person(state: State<AppState>, id: Id) -> CmdResult<Household> {
-    mutate(&state, |c| db::delete_person(c, id))
+    let viewing_own = state.family.lock().map_err(err)?.active_id().is_none();
+    let h = mutate(&state, |c| db::delete_person(c, id))?;
+    // A child removed from your household keeps their own household, unlinked.
+    if viewing_own {
+        state.family.lock().map_err(err)?.unlink_person(id).map_err(err)?;
+    }
+    Ok(h)
 }
 
 #[tauri::command]
@@ -446,11 +535,9 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
-            let db_path = dir.join("household.sqlite");
-            let conn = db::open(&db_path)?;
+            let family = Family::open(&dir)?;
             app.manage(AppState {
-                conn: Mutex::new(conn),
-                db_path,
+                family: Mutex::new(family),
                 app_data_dir: dir,
                 auto: Mutex::new(AutoBackup::default()),
                 simulation_cache: Mutex::new(Vec::new()),
@@ -492,6 +579,12 @@ pub fn run() {
             restore_backup,
             get_backup_settings,
             save_backup_settings,
+            list_households,
+            switch_household,
+            build_child_household,
+            delete_child_household,
+            set_parent_plan,
+            incoming_summary,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -499,8 +592,8 @@ pub fn run() {
             // Last automatic backup of anything changed since the previous one.
             if let RunEvent::Exit = event {
                 let state = app.state::<AppState>();
-                if let Ok(conn) = state.conn.lock() {
-                    auto_backup(&state, &conn, true);
+                if let Ok(fam) = state.family.lock() {
+                    auto_backup(&state, &fam, true);
                 }
             }
         });

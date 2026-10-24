@@ -403,6 +403,33 @@ pub struct Household {
     /// "What if" plans built on top of everything above (the base plan).
     #[serde(default)]
     pub scenarios: Vec<Scenario>,
+    /// Money arriving from a parent's plan (gifts, 529s, loans, inheritance), by year.
+    /// Computed when a child's plan is linked to a parent's; never stored.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub incoming: Vec<IncomingTransfer>,
+}
+
+/// One year of money arriving from a parent's plan, in that year's (nominal) dollars.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct IncomingTransfer {
+    pub year: i32,
+    /// Cash gifts (including down-payment help).
+    pub cash: f64,
+    /// Investments given in kind (stock, LLC shares, GRAT remainders), at market value...
+    pub assets: f64,
+    /// ...and their cost basis, carried over from the parent.
+    pub assets_basis: f64,
+    /// Into a 529 for this child.
+    pub education: f64,
+    /// Tuition or medical bills the parent pays directly (spending the child doesn't have to do).
+    pub paid_for_you: f64,
+    /// A family loan received...
+    pub loan_in: f64,
+    /// ...and this year's payments on it (interest + principal), net of anything forgiven.
+    pub loan_payment: f64,
+    /// Inheritance after estate tax and the heirs' IRA income tax (stepped-up basis).
+    pub inheritance: f64,
 }
 
 // ---------------------------------------------------------------------------

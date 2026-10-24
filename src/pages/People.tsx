@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { useApp } from "../lib/store";
 import { ageOf, currentYear, ROLE_LABELS, type Person, type Role } from "../lib/types";
 import { useEditor } from "../lib/useEditor";
+import { useState } from "react";
 
 function newPerson(hasPrimary: boolean): Person {
   return {
@@ -22,14 +23,38 @@ function newPerson(hasPrimary: boolean): Person {
 
 export default function People() {
   const people = useApp((s) => s.household!.people);
+  const family = useApp((s) => s.family);
+  const mutate = useApp((s) => s.mutate);
+  const switchHousehold = useApp((s) => s.switchHousehold);
+  const go = useApp((s) => s.go);
   const ed = useEditor<Person>({ save: api.upsertPerson, remove: api.deletePerson });
   const hasPrimary = people.some((p) => p.role === "primary");
+  const [error, setError] = useState<string | null>(null);
+  // Children's households are built from your own household only.
+  const viewingOwn = family?.households[0]?.active ?? true;
+  const householdOf = (p: Person) => family?.children.find((c) => c.personId === p.id);
+
+  const openChild = async (p: Person) => {
+    setError(null);
+    try {
+      const existing = householdOf(p)?.householdId;
+      if (existing != null) await switchHousehold(existing);
+      else await mutate(() => api.buildChildHousehold(p.id!));
+      go("overview");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   return (
     <>
       <PageHeader
         title="People"
-        subtitle="You, and anyone whose money or future matters to the plan. Add children too: later, gifts and inheritance are planned around them."
+        subtitle={
+          viewingOwn
+            ? "You, and anyone whose money or future matters to the plan. Add your children too: gifts and inheritance are planned around them, and each can have a full household of their own."
+            : "This household's people: the main person, and a spouse or children if they have them."
+        }
         actions={
           <Button variant="primary" onClick={() => ed.open(newPerson(hasPrimary))}>
             <Plus size={16} /> Add person
@@ -37,6 +62,13 @@ export default function People() {
         }
       />
 
+      {error && <p className="mb-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {viewingOwn && people.some((p) => p.role === "child") && (
+        <p className="mb-3 text-sm text-[var(--muted)]">
+          Build a child's household to enter their own accounts, income, debts and plans. It's linked to yours, so the
+          gifts and inheritance in your plans show up in their forecast.
+        </p>
+      )}
       {people.length === 0 ? (
         <EmptyState
           title="Start with yourself"
@@ -57,6 +89,28 @@ export default function People() {
             { header: "Relationship", cell: (p) => ROLE_LABELS[p.role] },
             { header: "Age", align: "right", cell: (p) => ageOf(p) },
             { header: "Plan runs to", align: "right", cell: (p) => `age ${p.lifeExpectancy}` },
+            ...(viewingOwn && people.some((p) => p.role === "child")
+              ? [
+                  {
+                    header: "Their own finances",
+                    align: "right" as const,
+                    cell: (p: Person) =>
+                      p.role === "child" && p.id != null ? (
+                        <button
+                          className="font-medium text-accent hover:underline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void openChild(p);
+                          }}
+                        >
+                          {householdOf(p)?.householdId != null
+                            ? `Open ${p.name}'s household →`
+                            : `Build ${p.name}'s household →`}
+                        </button>
+                      ) : null,
+                  },
+                ]
+              : []),
           ]}
         />
       )}

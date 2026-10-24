@@ -1,7 +1,9 @@
-//! Backup files (`.fsim`): everything in the household in one file, readable by
-//! every later version of the app.
+//! Backup files (`.fsim`): every household in the family (yours, plus any child
+//! households) in one file, readable by every later version of the app.
 //!
-//! - Plain: a JSON envelope `{ format, formatVersion, appVersion, savedAt, household }`.
+//! - Plain: a JSON envelope `{ format, formatVersion, appVersion, savedAt, households }`,
+//!   each entry `{ name, linkedTo, household }`, yours first. Version 1 files held a single
+//!   `household`; they open as a family of one.
 //! - With a password: `FSIMENC1` + Argon2id params + salt + nonce, then the same
 //!   JSON encrypted with XChaCha20-Poly1305 (key from the password via Argon2id).
 //!
@@ -16,13 +18,13 @@ use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::rand_core::RngCore;
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
-use engine::model::{Household, Role};
+use engine::model::{Household, Id, Role};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const FORMAT: &str = "finance-simulator-backup";
-/// Bump only when [`upgrade`] gains a step.
-pub const FORMAT_VERSION: u32 = 1;
+/// Bump only when [`upgrade`] gains a step. 2: a list of households (family backups).
+pub const FORMAT_VERSION: u32 = 2;
 pub const EXTENSION: &str = "fsim";
 const MAGIC: &[u8; 8] = b"FSIMENC1";
 const SALT_LEN: usize = 16;
@@ -44,10 +46,52 @@ struct Envelope {
     format_version: u32,
     app_version: String,
     saved_at: String,
-    household: Value,
+    /// Version 1: the one household.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    household: Option<Value>,
+    /// Version 2+: every household, yours first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    households: Option<Vec<Value>>,
 }
 
-/// About a backup file, shown before restoring it.
+/// How a child's household is tied to yours: the child's person id in your household,
+/// and which of your plans feeds it (`None` = your base plan).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Link {
+    pub person_id: Id,
+    #[serde(default)]
+    pub plan: Option<Id>,
+}
+
+/// One household in a backup.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HouseholdBackup {
+    pub name: String,
+    #[serde(default)]
+    pub linked_to: Option<Link>,
+    pub household: Household,
+}
+
+impl HouseholdBackup {
+    /// A household on its own (not linked to anyone).
+    pub fn alone(household: Household) -> HouseholdBackup {
+        HouseholdBackup { name: display_name(&household), linked_to: None, household }
+    }
+}
+
+/// The primary person's name, else the household's name.
+pub fn display_name(h: &Household) -> String {
+    h.people
+        .iter()
+        .find(|p| p.role == Role::Primary)
+        .map(|p| p.name.clone())
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| h.info.name.clone())
+}
+
+/// About a backup file, shown before restoring it. Counts describe the first household.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupInfo {
@@ -61,7 +105,10 @@ pub struct BackupInfo {
     pub accounts: usize,
     pub income: usize,
     pub debts: usize,
+    /// What-if plans (scenarios) in the first household.
     pub plans: usize,
+    /// Every household in the file, the first being the main one.
+    pub households: Vec<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -94,14 +141,17 @@ pub fn is_encrypted(bytes: &[u8]) -> bool {
     bytes.starts_with(MAGIC)
 }
 
-/// The backup file's bytes. `saved_at` is an RFC 3339 timestamp.
-pub fn encode(h: &Household, password: Option<&str>, app_version: &str, saved_at: &str) -> Vec<u8> {
+/// The backup file's bytes for `households` (the main one first). `saved_at` is RFC 3339.
+pub fn encode(households: &[HouseholdBackup], password: Option<&str>, app_version: &str, saved_at: &str) -> Vec<u8> {
     let envelope = Envelope {
         format: FORMAT.into(),
         format_version: FORMAT_VERSION,
         app_version: app_version.into(),
         saved_at: saved_at.into(),
-        household: serde_json::to_value(h).expect("a household always serializes"),
+        household: None,
+        households: Some(
+            households.iter().map(|h| serde_json::to_value(h).expect("a household always serializes")).collect(),
+        ),
     };
     let json = serde_json::to_vec_pretty(&envelope).expect("an envelope always serializes");
     match password.filter(|p| !p.is_empty()) {
@@ -111,7 +161,7 @@ pub fn encode(h: &Household, password: Option<&str>, app_version: &str, saved_at
 }
 
 /// Reads a backup made by this or any earlier version.
-pub fn decode(bytes: &[u8], password: Option<&str>) -> Result<(Household, BackupInfo), BackupError> {
+pub fn decode(bytes: &[u8], password: Option<&str>) -> Result<(Vec<HouseholdBackup>, BackupInfo), BackupError> {
     let encrypted = is_encrypted(bytes);
     let json = if encrypted {
         let pw = password.filter(|p| !p.is_empty()).ok_or(BackupError::NeedsPassword)?;
@@ -120,39 +170,71 @@ pub fn decode(bytes: &[u8], password: Option<&str>) -> Result<(Household, Backup
         bytes.to_vec()
     };
     let value: Value = serde_json::from_slice(&json).map_err(|_| BackupError::NotABackup)?;
-    let (household, app_version, saved_at, format_version) = match value.get("format").and_then(Value::as_str) {
+    let invalid = |e: serde_json::Error| BackupError::Invalid(e.to_string());
+    // Each entry as (name, link, household JSON), plus the file's own details.
+    let (entries, app_version, saved_at, format_version) = match value.get("format").and_then(Value::as_str) {
         Some(FORMAT) => {
-            let env: Envelope = serde_json::from_value(value).map_err(|e| BackupError::Invalid(e.to_string()))?;
+            let env: Envelope = serde_json::from_value(value).map_err(invalid)?;
             if env.format_version > FORMAT_VERSION {
                 return Err(BackupError::TooNew { app_version: env.app_version });
             }
-            (upgrade(env.household, env.format_version)?, env.app_version, env.saved_at, env.format_version)
+            let entries = match (env.households, env.household) {
+                (Some(list), _) => list
+                    .into_iter()
+                    .map(|mut e| {
+                        let household = e.get_mut("household").map(Value::take).ok_or(BackupError::NotABackup)?;
+                        let name = e.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
+                        let link = e.get("linkedTo").cloned().unwrap_or(Value::Null);
+                        Ok((name, link, household))
+                    })
+                    .collect::<Result<Vec<_>, BackupError>>()?,
+                (None, Some(h)) => vec![(String::new(), Value::Null, h)],
+                (None, None) => return Err(BackupError::NotABackup),
+            };
+            (entries, env.app_version, env.saved_at, env.format_version)
         }
         Some(_) => return Err(BackupError::NotABackup),
         // A bare household (e.g. a demo fixture) is accepted as version 1.
         None if value.get("people").is_some() && value.get("accounts").is_some() => {
-            (upgrade(value, 1)?, String::new(), String::new(), 1)
+            (vec![(String::new(), Value::Null, value)], String::new(), String::new(), 1)
         }
         None => return Err(BackupError::NotABackup),
     };
-    let h: Household = serde_json::from_value(household).map_err(|e| BackupError::Invalid(e.to_string()))?;
-    h.validate().map_err(BackupError::Invalid)?;
-    let info = info(&h, app_version, saved_at, format_version, encrypted);
-    Ok((h, info))
+    if entries.is_empty() {
+        return Err(BackupError::NotABackup);
+    }
+    let mut households = Vec::with_capacity(entries.len());
+    for (name, link, json) in entries {
+        let h: Household = serde_json::from_value(upgrade(json, format_version)?).map_err(invalid)?;
+        h.validate().map_err(BackupError::Invalid)?;
+        let linked_to: Option<Link> = serde_json::from_value(link).map_err(invalid)?;
+        let name = if name.trim().is_empty() { display_name(&h) } else { name };
+        households.push(HouseholdBackup { name, linked_to, household: h });
+    }
+    let info = info(&households, app_version, saved_at, format_version, encrypted);
+    Ok((households, info))
 }
 
 /// Brings an older file's household JSON up to the current shape, one version at a time.
 /// Purely additive changes need no step (new fields default); add one here for renames
-/// or restructures, then bump `FORMAT_VERSION` and add a golden file.
+/// or restructures, then bump `FORMAT_VERSION` and add a golden file. (Version 2 only
+/// changed the envelope, which `decode` handles.)
 fn upgrade(household: Value, from: u32) -> Result<Value, BackupError> {
-    // Steps run oldest first, each taking the file one version forward, e.g.
-    //     if from < 2 { v = v1_to_v2(v)?; }
+    // Steps run oldest first, each taking the household one version forward, e.g.
+    //     if from < 3 { v = v2_to_v3(v)?; }
     let v = household;
     debug_assert!(from <= FORMAT_VERSION);
     Ok(v)
 }
 
-fn info(h: &Household, app_version: String, saved_at: String, format_version: u32, encrypted: bool) -> BackupInfo {
+fn info(
+    households: &[HouseholdBackup],
+    app_version: String,
+    saved_at: String,
+    format_version: u32,
+    encrypted: bool,
+) -> BackupInfo {
+    let h = &households[0].household;
     BackupInfo {
         app_version,
         saved_at,
@@ -165,6 +247,7 @@ fn info(h: &Household, app_version: String, saved_at: String, format_version: u3
         income: h.income.len(),
         debts: h.debts.len(),
         plans: h.scenarios.len(),
+        households: households.iter().map(|h| h.name.clone()).collect(),
     }
 }
 
@@ -255,7 +338,7 @@ pub fn write_auto(folder: &Path, bytes: &[u8], stamp: &str) -> std::io::Result<P
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::demo::{Demo, household};
+    use crate::demo::{Demo, family, household};
 
     const SAVED_AT: &str = "2026-10-24T14:30:00-05:00";
 
@@ -263,13 +346,18 @@ mod tests {
         household(Demo::Retiree)
     }
 
+    fn one(h: Household) -> Vec<HouseholdBackup> {
+        vec![HouseholdBackup::alone(h)]
+    }
+
     #[test]
     fn plain_round_trip_is_lossless() {
         let h = demo();
-        let bytes = encode(&h, None, "0.5.0", SAVED_AT);
+        let bytes = encode(&one(h.clone()), None, "0.5.0", SAVED_AT);
         assert!(!is_encrypted(&bytes));
         let (back, info) = decode(&bytes, None).unwrap();
-        assert_eq!(back, h);
+        assert_eq!(back[0].household, h);
+        assert_eq!(back[0].name, "Pat");
         assert_eq!(info.app_version, "0.5.0");
         assert_eq!(info.plans, h.scenarios.len());
         assert_eq!(info.children, 2);
@@ -277,14 +365,24 @@ mod tests {
     }
 
     #[test]
+    fn family_round_trip_keeps_every_household_and_its_link() {
+        let fam = family(Demo::Retiree);
+        assert!(fam.len() >= 2);
+        let (back, info) = decode(&encode(&fam, None, "0.5.0", SAVED_AT), None).unwrap();
+        assert_eq!(back, fam);
+        assert_eq!(info.households, fam.iter().map(|h| h.name.clone()).collect::<Vec<_>>());
+        assert_eq!(back[1].linked_to, Some(Link { person_id: 2, plan: None }));
+    }
+
+    #[test]
     fn password_round_trip_and_failures() {
         let h = demo();
-        let bytes = encode(&h, Some("correct horse"), "0.5.0", SAVED_AT);
+        let bytes = encode(&one(h.clone()), Some("correct horse"), "0.5.0", SAVED_AT);
         assert!(is_encrypted(&bytes));
         // The household's name never appears in the clear.
         assert!(!bytes.windows(7).any(|w| w == b"Retired"));
         let (back, info) = decode(&bytes, Some("correct horse")).unwrap();
-        assert_eq!(back, h);
+        assert_eq!(back[0].household, h);
         assert!(info.encrypted);
         assert_eq!(decode(&bytes, None).unwrap_err(), BackupError::NeedsPassword);
         assert_eq!(decode(&bytes, Some("wrong")).unwrap_err(), BackupError::WrongPassword);
@@ -299,13 +397,13 @@ mod tests {
 
     #[test]
     fn empty_password_means_no_password() {
-        let bytes = encode(&demo(), Some(""), "0.5.0", SAVED_AT);
+        let bytes = encode(&one(demo()), Some(""), "0.5.0", SAVED_AT);
         assert!(!is_encrypted(&bytes));
     }
 
     #[test]
     fn files_from_a_newer_version_ask_to_update() {
-        let mut v: Value = serde_json::from_slice(&encode(&demo(), None, "0.5.0", SAVED_AT)).unwrap();
+        let mut v: Value = serde_json::from_slice(&encode(&one(demo()), None, "0.5.0", SAVED_AT)).unwrap();
         v["formatVersion"] = (FORMAT_VERSION + 1).into();
         v["appVersion"] = "0.9.0".into();
         let err = decode(&serde_json::to_vec(&v).unwrap(), None).unwrap_err();
@@ -323,15 +421,31 @@ mod tests {
     #[test]
     fn a_bare_household_json_is_accepted() {
         let json = serde_json::to_vec(&demo()).unwrap();
-        assert_eq!(decode(&json, None).unwrap().0, demo());
+        assert_eq!(decode(&json, None).unwrap().0[0].household, demo());
+    }
+
+    /// A version-1 file (one `household`) opens as a family of one.
+    #[test]
+    fn version_1_envelopes_open_as_one_household() {
+        let mut v: Value = serde_json::from_slice(&encode(&one(demo()), None, "0.5.0", SAVED_AT)).unwrap();
+        let h = v["households"][0]["household"].take();
+        let v1 = serde_json::json!({
+            "format": FORMAT, "formatVersion": 1, "appVersion": "0.5.0", "savedAt": SAVED_AT, "household": h,
+        });
+        let (back, info) = decode(&serde_json::to_vec(&v1).unwrap(), None).unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].household, demo());
+        assert_eq!(back[0].linked_to, None);
+        assert_eq!(info.format_version, 1);
     }
 
     /// Fields added after the first release must default, so files saved before they
     /// existed still open. Removes every such field from a backup and loads it.
     #[test]
     fn files_without_newer_fields_still_open() {
-        let mut v: Value = serde_json::from_slice(&encode(&demo(), None, "0.5.0", SAVED_AT)).unwrap();
-        let h = v["household"].as_object_mut().unwrap();
+        let mut v: Value = serde_json::from_slice(&encode(&one(demo()), None, "0.5.0", SAVED_AT)).unwrap();
+        v["households"][0].as_object_mut().unwrap().remove("linkedTo");
+        let h = v["households"][0]["household"].as_object_mut().unwrap();
         h.remove("assumptions");
         h.remove("scenarios");
         h["info"].as_object_mut().unwrap().remove("homePropertyTax");
@@ -345,25 +459,26 @@ mod tests {
             d.as_object_mut().unwrap().remove("homeMortgage");
         }
         let (back, _) = decode(&serde_json::to_vec(&v).unwrap(), None).unwrap();
-        assert!(back.scenarios.is_empty());
-        assert_eq!(back.assumptions, engine::model::Assumptions::default());
-        assert_eq!(back.accounts.len(), demo().accounts.len());
+        assert!(back[0].household.scenarios.is_empty());
+        assert_eq!(back[0].household.assumptions, engine::model::Assumptions::default());
+        assert_eq!(back[0].household.accounts.len(), demo().accounts.len());
     }
 
     #[test]
     fn unknown_fields_are_ignored() {
-        let mut v: Value = serde_json::from_slice(&encode(&demo(), None, "0.5.0", SAVED_AT)).unwrap();
-        v["household"]["somethingFromTheFuture"] = 42.into();
-        v["household"]["info"]["anotherNewThing"] = "x".into();
+        let mut v: Value = serde_json::from_slice(&encode(&one(demo()), None, "0.5.0", SAVED_AT)).unwrap();
+        v["households"][0]["household"]["somethingFromTheFuture"] = 42.into();
+        v["households"][0]["household"]["info"]["anotherNewThing"] = "x".into();
+        v["households"][0]["somethingElse"] = true.into();
         assert!(decode(&serde_json::to_vec(&v).unwrap(), None).is_ok());
     }
 
     /// Golden files: saved once by a released version and never edited. Every later
-    /// version must open them. Regenerate only for a new format version, as a new file.
+    /// version must open them. Regenerate only for a new format version, as new files.
     #[test]
     fn golden_backups_always_open() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/backups");
-        let mut seen = 0;
+        let mut seen = Vec::new();
         for entry in std::fs::read_dir(&dir).unwrap() {
             let path = entry.unwrap().path();
             if path.extension().is_none_or(|x| x != EXTENSION) {
@@ -371,20 +486,23 @@ mod tests {
             }
             let bytes = std::fs::read(&path).unwrap();
             let pw = is_encrypted(&bytes).then_some(GOLDEN_PASSWORD);
-            let (h, info) = decode(&bytes, pw).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-            assert!(!h.people.is_empty() && info.accounts > 0, "{}", path.display());
-            seen += 1;
+            let (households, info) = decode(&bytes, pw).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            assert!(!households[0].household.people.is_empty() && info.accounts > 0, "{}", path.display());
+            seen.push(info.format_version);
         }
-        assert!(seen >= 2, "expected golden files in {}", dir.display());
+        for v in 1..=FORMAT_VERSION {
+            assert!(seen.contains(&v), "no golden file for format version {v} in {}", dir.display());
+        }
     }
 
     #[test]
     fn restoring_a_golden_backup_into_the_database_is_lossless() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/backups/v1-retiree.fsim");
-        let (h, _) = decode(&std::fs::read(path).unwrap(), None).unwrap();
+        let (households, _) = decode(&std::fs::read(path).unwrap(), None).unwrap();
+        let h = &households[0].household;
         let mut conn = crate::db::open_in_memory().unwrap();
-        crate::db::replace_household(&mut conn, &h).unwrap();
-        assert_eq!(crate::db::load_household(&conn).unwrap(), h);
+        crate::db::replace_household(&mut conn, h).unwrap();
+        assert_eq!(&crate::db::load_household(&conn).unwrap(), h);
     }
 
     /// Dev check against a real database copy: migrates it, backs it up, and restores it.
@@ -396,8 +514,8 @@ mod tests {
         let conn = crate::db::open(Path::new(&path)).unwrap();
         let h = crate::db::load_household(&conn).unwrap();
         for pw in [None, Some("a real password")] {
-            let (back, info) = decode(&encode(&h, pw, "0.5.0", SAVED_AT), pw).unwrap();
-            assert_eq!(back, h);
+            let (back, info) = decode(&encode(&one(h.clone()), pw, "0.5.0", SAVED_AT), pw).unwrap();
+            assert_eq!(back[0].household, h);
             println!(
                 "{} ({}): {} people, {} accounts, {} plans",
                 info.household_name,
@@ -423,12 +541,12 @@ mod tests {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/backups");
         std::fs::create_dir_all(&dir).unwrap();
         let version = env!("CARGO_PKG_VERSION");
-        let h = demo();
-        let plain = dir.join(format!("v{FORMAT_VERSION}-retiree.fsim"));
-        let locked = dir.join(format!("v{FORMAT_VERSION}-retiree-password.fsim"));
+        let fam = family(Demo::Retiree);
+        let plain = dir.join(format!("v{FORMAT_VERSION}-family.fsim"));
+        let locked = dir.join(format!("v{FORMAT_VERSION}-family-password.fsim"));
         assert!(!plain.exists() && !locked.exists(), "golden files are never overwritten");
-        std::fs::write(plain, encode(&h, None, version, SAVED_AT)).unwrap();
-        std::fs::write(locked, encode(&h, Some(GOLDEN_PASSWORD), version, SAVED_AT)).unwrap();
+        std::fs::write(plain, encode(&fam, None, version, SAVED_AT)).unwrap();
+        std::fs::write(locked, encode(&fam, Some(GOLDEN_PASSWORD), version, SAVED_AT)).unwrap();
     }
 
     #[test]

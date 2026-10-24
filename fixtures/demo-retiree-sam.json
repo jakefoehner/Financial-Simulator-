@@ -1,0 +1,106 @@
+{
+  "info": {
+    "name": "Demo: Sam",
+    "state": "TX",
+    "flatStateRate": 0,
+    "filingStatus": "single",
+    "baseAnnualSpending": 68000,
+    "homePropertyTax": 0
+  },
+  "people": [
+    {
+      "id": 1,
+      "name": "Sam",
+      "birthYear": 1995,
+      "role": "primary",
+      "lifeExpectancy": 100,
+      "ssMonthlyBenefit": 2900,
+      "ssClaimAge": 67,
+      "ssAlreadyClaiming": false
+    }
+  ],
+  "accounts": [
+    {
+      "id": 1,
+      "name": "401(k)",
+      "accountType": "trad_401k",
+      "ownerId": 1,
+      "balance": 92000,
+      "costBasis": null,
+      "stocksPct": 0.9,
+      "bondsPct": 0.1,
+      "cashPct": 0,
+      "annualContribution": 15000,
+      "employerMatch": 6000,
+      "notes": ""
+    },
+    {
+      "id": 2,
+      "name": "Roth IRA",
+      "accountType": "roth_ira",
+      "ownerId": 1,
+      "balance": 34000,
+      "costBasis": null,
+      "stocksPct": 1,
+      "bondsPct": 0,
+      "cashPct": 0,
+      "annualContribution": 7000,
+      "employerMatch": 0,
+      "notes": ""
+    },
+    {
+      "id": 3,
+      "name": "Checking",
+      "accountType": "checking",
+      "ownerId": 1,
+      "balance": 18000,
+      "costBasis": null,
+      "stocksPct": 0,
+      "bondsPct": 0,
+      "cashPct": 1,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": ""
+    },
+    {
+      "id": 4,
+      "name": "Brokerage",
+      "accountType": "taxable",
+      "ownerId": 1,
+      "balance": 21000,
+      "costBasis": 16000,
+      "stocksPct": 1,
+      "bondsPct": 0,
+      "cashPct": 0,
+      "annualContribution": 2400,
+      "employerMatch": 0,
+      "notes": ""
+    }
+  ],
+  "income": [
+    {
+      "id": 1,
+      "personId": 1,
+      "kind": "w2",
+      "name": "Salary",
+      "annualAmount": 118000,
+      "growthRate": 0.035,
+      "startAge": null,
+      "endAge": 65
+    }
+  ],
+  "debts": [
+    {
+      "id": 1,
+      "name": "Student loans",
+      "kind": "student_loan",
+      "balance": 22000,
+      "interestRate": 0.05,
+      "monthlyPayment": 280,
+      "accountId": null,
+      "notes": "",
+      "homeMortgage": false
+    }
+  ],
+  "oneTimeExpenses": [{ "id": 1, "name": "First home: down payment and closing", "year": 2028, "amount": 160000 }]
+}

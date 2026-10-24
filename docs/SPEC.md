@@ -146,6 +146,13 @@ v2 hook: a "tax regime" setting that multiplies or replaces brackets and exempti
   3. Automatic backups go to a chosen folder: after changes (at most every 5 minutes) and at quit, keeping 10, with no password. They're stored in a new `app_settings` table (migration 0008), outside the household.
   4. Opening a backup replaces the household after a confirmation and a safety copy. Read-only viewing of someone else's file, CSV import/export and the PDF report are deferred.
   5. Compatibility: additive fields default; renames go through `upgrade()`; golden files in `fixtures/backups/` must always open; newer files get an "update the app" message. Version bumped to 0.5.0.
+- **2026-10-24: Phase 7 = family households** (Jacob). Children must be "fully buildable, the same way the main person is", and the backup page has to be easy to find.
+  1. Each child gets a full household (every page, including plans and a forecast) in its own SQLite file. The main file lists them in `family_household` (migration 0009). The UI calls them "households", since "plans" already means what-if scenarios.
+  2. **Linked:** the child household picks one of the parent's plans. Its `transfers_by_child` and the estate's per-child inheritance become `Household.incoming`, computed at run time and never stored. Projection applies it: cash and the inheritance go to savings, assets keep the parent's basis, 529 money goes to a 529, loans arrive as cash with payments out. The parent side uses its steady path.
+  3. Anyone can build a child's household and share it. A one-household backup can be loaded as a specific child.
+  4. Backup format v2: a list of households with their links; v1 opens as one household. New golden files `v2-family*.fsim`.
+  5. A "Save & load" page in the sidebar replaces the Settings card, with a household list (open/delete) and automatic backups (which save the whole family).
+  6. Next: Phase 8 (search on Scenarios, the decision picker and the Giving guide).
 
 ## Verification
 - `cargo test -p engine`: tax tests against IRS worked examples and hand-computed cases (brackets, LTCG stacking, SS taxability, NIIT, RMD, gift/estate exemption). Golden-file projections for the demo households. Monte Carlo sanity checks: with zero volatility the result must equal the fixed-mode output, and a fixed seed must be reproducible.

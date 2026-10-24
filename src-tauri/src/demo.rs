@@ -2,6 +2,8 @@
 //! explore the app before entering their own numbers.
 
 use engine::model::Household;
+
+use crate::backup::{HouseholdBackup, Link};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -28,6 +30,22 @@ pub fn household(which: Demo) -> Household {
     serde_json::from_str(which.json()).expect("demo fixture is valid JSON")
 }
 
+/// The demo's whole family: the main household first, then any child households.
+/// "Retired in Texas" includes Sam's own household, linked to Pat's.
+pub fn family(which: Demo) -> Vec<HouseholdBackup> {
+    let mut all = vec![HouseholdBackup::alone(household(which))];
+    if which == Demo::Retiree {
+        let sam: Household = serde_json::from_str(include_str!("../../fixtures/demo-retiree-sam.json"))
+            .expect("demo fixture is valid JSON");
+        all.push(HouseholdBackup {
+            name: "Sam".into(),
+            linked_to: Some(Link { person_id: 2, plan: None }),
+            household: sam,
+        });
+    }
+    all
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -35,9 +53,10 @@ mod tests {
     #[test]
     fn every_demo_parses_and_validates() {
         for which in Demo::ALL {
-            let h = household(*which);
-            h.validate().unwrap_or_else(|e| panic!("{which:?}: {e}"));
-            assert!(!h.people.is_empty() && !h.accounts.is_empty());
+            for f in family(*which) {
+                f.household.validate().unwrap_or_else(|e| panic!("{which:?} {}: {e}", f.name));
+                assert!(!f.household.people.is_empty() && !f.household.accounts.is_empty());
+            }
         }
     }
 
@@ -87,7 +106,41 @@ mod tests {
         }
         let req = engine::solver::SafeGiftRequest { yearly: false, years: 1, target: 0.95 };
         let gift = engine::solver::safe_gift(&h, None, 2026, req).unwrap();
-        json.as_object_mut().unwrap().insert("safe_gift".into(), serde_json::to_value(gift).unwrap());
+        let out = json.as_object_mut().unwrap();
+        out.insert("safe_gift".into(), serde_json::to_value(gift).unwrap());
+
+        // The family, and Sam's linked household (fed by Pat's "Help Sam" plan), keyed "sam|<command>".
+        let dir = std::env::temp_dir().join(format!("fsim-dump-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut fam = crate::family::Family::open(&dir).unwrap();
+        fam.import_all(&family(Demo::Retiree)).unwrap();
+        let overview = |f: &crate::family::Family| serde_json::json!({ "households": f.list().unwrap(), "children": f.children().unwrap() });
+        out.insert("list_households".into(), overview(&fam));
+        let sam = fam.list().unwrap()[1].id.unwrap();
+        fam.set_parent_plan(sam, Some(1)).unwrap();
+        fam.switch(Some(sam)).unwrap();
+        let sam_h = fam.household_for_engine(2026).unwrap();
+        out.insert("sam|list_households".into(), overview(&fam));
+        out.insert(
+            "sam|get_household".into(),
+            serde_json::to_value(crate::db::load_household(fam.conn()).unwrap()).unwrap(),
+        );
+        out.insert("sam|incoming_summary".into(), serde_json::to_value(fam.incoming_summary(2026).unwrap()).unwrap());
+        let sim = simulate(&sam_h, None, 2026).unwrap();
+        for r in &sim.representatives {
+            let d = scenario_detail(&sam_h, None, 2026, r.path_index).unwrap();
+            out.insert(format!("sam|scenario_detail:base:{}", r.path_index), serde_json::to_value(d).unwrap());
+        }
+        out.insert("sam|run_simulation:base".into(), serde_json::to_value(sim).unwrap());
+        out.insert(
+            "sam|run_projection:base".into(),
+            serde_json::to_value(project(&sam_h, None, 2026).unwrap()).unwrap(),
+        );
+        out.insert(
+            "sam|compare_claim_ages:base".into(),
+            serde_json::to_value(compare_claim_ages(&sam_h, None, 2026).unwrap()).unwrap(),
+        );
+        let _ = std::fs::remove_dir_all(dir);
         std::fs::write(path, serde_json::to_string(&json).unwrap()).unwrap();
     }
 
