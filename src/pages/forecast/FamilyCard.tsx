@@ -77,7 +77,7 @@ export default function FamilyCard({ estate, range }: { estate: EstateResult; ra
           on the {formatUsdCompact(iraInherited)} they'd inherit in traditional IRA/401(k) accounts, which must be
           emptied within 10 years.{" "}
           <button
-            className="text-accent hover:underline"
+            className="no-print text-accent hover:underline"
             onClick={() => document.getElementById("assumptions")?.scrollIntoView({ behavior: "smooth" })}
           >
             Change it in Assumptions below.

@@ -22,10 +22,12 @@ import Income from "./pages/Income";
 import Overview from "./pages/Overview";
 import People from "./pages/People";
 import Settings from "./pages/Settings";
+import Report from "./pages/Report";
 import Results from "./pages/Results";
 import SaveLoad from "./pages/SaveLoad";
 import Scenarios from "./pages/scenarios/Scenarios";
 import Spending from "./pages/Spending";
+import { api } from "./lib/api";
 import { activeHousehold, useApp, type Section } from "./lib/store";
 
 const NAV: { id: Section; label: string; icon: LucideIcon }[][] = [
@@ -56,6 +58,7 @@ const PAGES: Record<Section, () => React.JSX.Element | null> = {
   debts: Debts,
   spending: Spending,
   results: Results,
+  report: Report,
   scenarios: Scenarios,
   guide: Guide,
   data: SaveLoad,
@@ -63,7 +66,7 @@ const PAGES: Record<Section, () => React.JSX.Element | null> = {
 };
 
 export default function App() {
-  const { section, go, household, family, loadError, load, switchHousehold } = useApp();
+  const { section, go, household, family, loadError, load, switchHousehold, mutate } = useApp();
 
   useEffect(() => {
     void load();
@@ -98,8 +101,30 @@ export default function App() {
 
       <main className="flex-1 overflow-y-auto px-10 py-8">
         <div className="mx-auto max-w-5xl">
+          {family?.viewing && (
+            <div className="no-print mb-5 flex items-center justify-between gap-4 rounded-lg bg-amber-500/15 px-4 py-2 text-sm">
+              <span>
+                <strong className="font-semibold">Viewing “{family.viewing}” (read-only).</strong>{" "}
+                <span className="text-[var(--muted)]">Look around freely; nothing here can be changed or saved.</span>
+              </span>
+              <span className="flex shrink-0 gap-3">
+                <button
+                  className="font-medium text-accent hover:underline"
+                  onClick={async () => {
+                    await mutate(api.closeView);
+                    useApp.getState().requestBackup("open");
+                  }}
+                >
+                  Load it as my own…
+                </button>
+                <button className="font-medium text-accent hover:underline" onClick={() => void mutate(api.closeView)}>
+                  Close
+                </button>
+              </span>
+            </div>
+          )}
           {active && active.id != null && main && (
-            <div className="mb-5 flex items-center justify-between gap-4 rounded-lg bg-accent/10 px-4 py-2 text-sm">
+            <div className="no-print mb-5 flex items-center justify-between gap-4 rounded-lg bg-accent/10 px-4 py-2 text-sm">
               <span>
                 <strong className="font-semibold">{active.name}'s household.</strong>{" "}
                 <span className="text-[var(--muted)]">

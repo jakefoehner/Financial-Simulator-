@@ -1,0 +1,15 @@
+"Positions for All-Accounts as of 03:37 PM ET, 10/24/2026"
+
+"Individual ...123"
+"Symbol","Description","Quantity","Price","Price Change %","Price Change $","Market Value","Day Change %","Day Change $","Cost Basis","Gain/Loss %","Gain/Loss $","Ratings","Reinvest Dividends?","Capital Gains?","% Of Account","Security Type"
+"META","META PLATFORMS INC CLASS A","1,200","$642.62","-0.96%","-$6.25","$771,144.00","-0.96%","-$7,500.00","$150,000.00","414.1%","$621,144.00","B","No","N/A","67.59%","Equity"
+"VTI","VANGUARD TOTAL STOCK MARKET ETF","1,000","$285.00","0.11%","$0.30","$285,000.00","0.11%","$300.00","$200,000.00","42.5%","$85,000.00","--","Yes","N/A","24.98%","ETFs & Closed End Funds"
+"BND","VANGUARD TOTAL BOND MARKET ETF","1,000","$72.40","0.05%","$0.04","$72,400.00","0.05%","$40.00","$75,000.00","-3.47%","-$2,600.00","--","Yes","N/A","6.35%","ETFs & Closed End Funds"
+"Cash & Cash Investments","--","--","--","--","--","$12,345.67","0%","$0.00","--","--","--","--","--","--","1.08%","Cash and Money Market"
+"Account Total","--","--","--","--","--","$1,140,889.67","-0.66%","-$7,160.00","$425,000.00","168.5%","$703,544.00","--","--","--","--","--"
+
+"Roth IRA ...4567"
+"Symbol","Description","Quantity","Price","Price Change %","Price Change $","Market Value","Day Change %","Day Change $","Cost Basis","Gain/Loss %","Gain/Loss $","Ratings","Reinvest Dividends?","Capital Gains?","% Of Account","Security Type"
+"AAPL","APPLE INC","300","$250.00","0.4%","$1.00","$75,000.00","0.4%","$300.00","$30,000.00","150%","$45,000.00","B","Yes","N/A","96.15%","Equity"
+"Cash & Cash Investments","--","--","--","--","--","$3,000.00","0%","$0.00","--","--","--","--","--","--","3.85%","Cash and Money Market"
+"Account Total","--","--","--","--","--","$78,000.00","0.38%","$300.00","$30,000.00","150%","$45,000.00","--","--","--","--","--"

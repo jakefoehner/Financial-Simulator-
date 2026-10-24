@@ -2,6 +2,7 @@ mod backup;
 mod db;
 mod demo;
 mod family;
+mod import;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -24,7 +25,9 @@ use tauri::{Emitter, Manager, RunEvent, State};
 
 struct AppState {
     /// Your household plus any child households; edits go to the one being viewed.
+    /// While someone else's file is open read-only, this holds that file and `own` holds yours.
     family: Mutex<Family>,
+    own: Mutex<Option<Family>>,
     /// Safety copies go here when automatic backups are off.
     app_data_dir: PathBuf,
     auto: Mutex<AutoBackup>,
@@ -122,6 +125,7 @@ fn note_change(state: &AppState, fam: &Family) {
 /// so the UI always renders exactly what's stored.
 fn mutate(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> db::Result<()>) -> CmdResult<Household> {
     let mut fam = state.family.lock().map_err(err)?;
+    fam.check_writable().map_err(err)?;
     f(fam.conn()).map_err(err)?;
     note_change(state, &fam);
     db::load_household(fam.conn_ref()).map_err(err)
@@ -130,6 +134,7 @@ fn mutate(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> db::Result
 /// For changes that replace or erase data: keeps a safety copy of the whole family first.
 fn replace_all(state: &State<AppState>, f: impl FnOnce(&mut Family) -> db::Result<()>) -> CmdResult<Household> {
     let mut fam = state.family.lock().map_err(err)?;
+    fam.check_writable().map_err(err)?;
     safety_copy(state, &fam).map_err(|e| format!("Nothing was changed: couldn't save a safety copy first. {e}"))?;
     f(&mut fam).map_err(err)?;
     note_change(state, &fam);
@@ -150,12 +155,90 @@ struct FamilyOverview {
     households: Vec<HouseholdEntry>,
     /// The children listed in your household.
     children: Vec<ChildRef>,
+    /// The file name, while someone else's file is open read-only.
+    viewing: Option<String>,
 }
 
 #[tauri::command]
 fn list_households(state: State<AppState>) -> CmdResult<FamilyOverview> {
     let fam = state.family.lock().map_err(err)?;
-    Ok(FamilyOverview { households: fam.list().map_err(err)?, children: fam.children().map_err(err)? })
+    Ok(FamilyOverview {
+        households: fam.list().map_err(err)?,
+        children: fam.children().map_err(err)?,
+        viewing: fam.read_only.clone(),
+    })
+}
+
+/// Opens someone else's backup read-only, in place of your own data until closed.
+#[tauri::command]
+fn view_backup(state: State<AppState>, path: String, password: Option<String>) -> CmdResult<Household> {
+    let bytes = read_backup_file(&path)?;
+    let (households, _) = backup::decode(&bytes, password.as_deref()).map_err(err)?;
+    let name = Path::new(&path).file_name().and_then(|n| n.to_str()).unwrap_or("backup").to_string();
+    let mut fam = state.family.lock().map_err(err)?;
+    let mut own = state.own.lock().map_err(err)?;
+    let dir = state.app_data_dir.join("Viewing");
+    let view = Family::open_read_only(&dir, &households, &name).map_err(err)?;
+    let previous = std::mem::replace(&mut *fam, view);
+    // Viewing another file while one is open keeps your own data, not the earlier view.
+    if own.is_none() {
+        *own = Some(previous);
+    }
+    db::load_household(fam.conn_ref()).map_err(err)
+}
+
+/// Closes a read-only file and returns to your own data.
+#[tauri::command]
+fn close_view(state: State<AppState>) -> CmdResult<Household> {
+    let mut fam = state.family.lock().map_err(err)?;
+    if let Some(mine) = state.own.lock().map_err(err)?.take() {
+        let view = std::mem::replace(&mut *fam, mine);
+        let dir = view.dir().to_path_buf();
+        drop(view);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    db::load_household(fam.conn_ref()).map_err(err)
+}
+
+// --- Importing from brokerage files and exporting ---------------------------------
+
+fn file_name(path: &str) -> String {
+    Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("export.csv").to_string()
+}
+
+fn read_text(path: &str) -> CmdResult<String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("Couldn't open that file: {e}"))?;
+    // Brokerage exports are UTF-8 or Windows-1252; keep whatever decodes.
+    Ok(String::from_utf8(bytes.clone()).unwrap_or_else(|_| bytes.iter().map(|&b| b as char).collect()))
+}
+
+/// What's in a brokerage positions file (or the columns to map, if it isn't recognized).
+#[tauri::command]
+fn read_import_file(path: String) -> CmdResult<import::ImportPreview> {
+    Ok(import::parse(&read_text(&path)?, &file_name(&path)))
+}
+
+#[tauri::command]
+fn read_import_mapped(path: String, mapping: import::ColumnMapping) -> CmdResult<import::ImportPreview> {
+    Ok(import::parse_mapped(&read_text(&path)?, &file_name(&path), &mapping))
+}
+
+/// Saves the imported accounts (new ones and updates) together.
+#[tauri::command]
+fn apply_import(state: State<AppState>, choices: Vec<import::ImportChoice>) -> CmdResult<Household> {
+    mutate(&state, |c| import::apply(c, &choices))
+}
+
+/// Writes a text file the user chose in a save dialog (CSV exports).
+#[tauri::command]
+fn write_text_file(path: String, contents: String) -> CmdResult<()> {
+    std::fs::write(&path, contents).map_err(|e| format!("Couldn't save the file: {e}"))
+}
+
+/// Opens the Mac print panel for the window (its PDF menu saves a PDF).
+#[tauri::command]
+fn print_page(window: tauri::WebviewWindow) -> CmdResult<()> {
+    window.print().map_err(err)
 }
 
 /// View another household (`None` = yours).
@@ -170,6 +253,7 @@ fn switch_household(state: State<AppState>, id: Option<i64>) -> CmdResult<Househ
 #[tauri::command]
 fn build_child_household(state: State<AppState>, person_id: Id) -> CmdResult<Household> {
     let mut fam = state.family.lock().map_err(err)?;
+    fam.check_writable().map_err(err)?;
     let id = fam.build_child(person_id).map_err(err)?;
     fam.switch(Some(id)).map_err(err)?;
     note_change(&state, &fam);
@@ -186,6 +270,7 @@ fn delete_child_household(state: State<AppState>, id: i64) -> CmdResult<Househol
 #[tauri::command]
 fn set_parent_plan(state: State<AppState>, plan: Option<Id>) -> CmdResult<()> {
     let mut fam = state.family.lock().map_err(err)?;
+    fam.check_writable().map_err(err)?;
     let id = fam.active_id().ok_or("Open a child's household first.")?;
     fam.set_parent_plan(id, plan).map_err(err)
 }
@@ -304,6 +389,7 @@ fn save_backup_settings(
     settings: db::BackupSettings,
 ) -> CmdResult<BackupStatus> {
     let fam = state.family.lock().map_err(err)?;
+    fam.check_writable().map_err(err)?;
     db::save_backup_settings(fam.main(), &settings).map_err(err)?;
     if settings.auto_backup {
         if let Ok(mut auto) = state.auto.lock() {
@@ -538,6 +624,7 @@ pub fn run() {
             let family = Family::open(&dir)?;
             app.manage(AppState {
                 family: Mutex::new(family),
+                own: Mutex::new(None),
                 app_data_dir: dir,
                 auto: Mutex::new(AutoBackup::default()),
                 simulation_cache: Mutex::new(Vec::new()),
@@ -585,6 +672,13 @@ pub fn run() {
             delete_child_household,
             set_parent_plan,
             incoming_summary,
+            view_backup,
+            close_view,
+            read_import_file,
+            read_import_mapped,
+            apply_import,
+            write_text_file,
+            print_page,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -623,6 +717,8 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         &[
             &MenuItem::with_id(app, "save_backup", "Save Backup…", true, Some("CmdOrCtrl+S"))?,
             &MenuItem::with_id(app, "open_backup", "Open Backup…", true, Some("CmdOrCtrl+O"))?,
+            &sep()?,
+            &MenuItem::with_id(app, "import_file", "Import from a Brokerage File…", true, Some("CmdOrCtrl+I"))?,
             &sep()?,
             &PredefinedMenuItem::close_window(app, None)?,
         ],

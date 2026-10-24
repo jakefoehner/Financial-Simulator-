@@ -1,0 +1,4 @@
+Account,Account type,Symbol,Description,Shares,Price,Value,Cost basis
+Joint brokerage,Taxable,VTI,Total stock market ETF,100,285,28500,20000
+Joint brokerage,Taxable,,Cash,,,5000,
+My Roth,Roth IRA,QQQ,Nasdaq 100 ETF,10,500,5000,

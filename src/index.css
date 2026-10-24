@@ -78,3 +78,40 @@ input,
 textarea {
   user-select: text;
 }
+
+/* Printing the Report (Save as PDF): light colors, no sidebar or buttons, whole cards per page. */
+@media print {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --text: #1d1d1f;
+    --muted: #55555a;
+    --border: #d2d2d7;
+    --band-outer: #cde2fb;
+    --band-inner: #86b6ef;
+    --band-median: #184f95;
+  }
+  nav,
+  .no-print {
+    display: none !important;
+  }
+  html,
+  body,
+  #root,
+  main {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  .report section,
+  .report > div {
+    break-inside: avoid;
+  }
+  .page-break {
+    break-before: page;
+  }
+}

@@ -12,10 +12,12 @@ export type Section =
   | "scenarios"
   | "guide"
   | "results"
+  | "report"
   | "data"
   | "settings";
 
-export type BackupRequest = "save" | "saveOne" | "open";
+/** "view" = open someone else's file read-only. */
+export type BackupRequest = "save" | "saveOne" | "open" | "view";
 
 interface AppStore {
   section: Section;
@@ -41,6 +43,9 @@ interface AppStore {
   /** Search text per list ("scenarios", "decisions", "guide"), kept while the app is open. */
   searches: Record<string, string>;
   setSearch: (scope: string, text: string) => void;
+  /** Set by the File menu: open the brokerage import on the Accounts page. */
+  importRequest: boolean;
+  setImportRequest: (on: boolean) => void;
 }
 
 /** Falls back to the base plan if the selected scenario was deleted. */
@@ -61,6 +66,8 @@ export const useApp = create<AppStore>((set, get) => ({
   loadError: null,
   backupRequest: null,
   searches: {},
+  importRequest: false,
+  setImportRequest: (importRequest) => set({ importRequest }),
   setSearch: (scope, text) => set({ searches: { ...get().searches, [scope]: text } }),
   requestBackup: (backupRequest) => set({ backupRequest }),
   go: (section) => set({ section }),

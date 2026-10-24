@@ -18,6 +18,7 @@ const brokerage: Account = {
   employerMatch: 0,
   notes: "",
   private: null,
+  holdings: [],
 };
 
 describe("withType", () => {

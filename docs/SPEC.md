@@ -158,6 +158,11 @@ v2 hook: a "tax regime" setting that multiplies or replaces brackets and exempti
   2. Scenarios: search plus sort (newest / A–Z / most for the kids), cards or a compact list, and a sticky compare bar.
   3. Decision picker: search with keywords per decision (`CHOICE_KEYWORDS`); Enter picks the first match.
   4. Giving guide: search, tag chips (`Strategy.tags`), collapsed cards, and an "On this page" list.
+- **2026-10-24: Phase 9 = data in and out** (Jacob).
+  1. Brokerage import for Schwab, Fidelity, Vanguard, Merrill and Morgan Stanley, plus a template, with a column-mapping fallback. One parser keyed on column-name aliases instead of five separate ones. Test files are synthetic, modeled on each export's published layout.
+  2. Positions are a JSON `holdings` column on the account (like `private_terms`), not a separate table: simpler, and they travel in backups.
+  3. Read-only viewing swaps in a temporary `Family` and refuses edits in `mutate`, `replace_all` and the household commands.
+  4. CSV exports, and a print-styled Report page saved as PDF through the native print panel (`WebviewWindow::print`).
 
 ## Verification
 - `cargo test -p engine`: tax tests against IRS worked examples and hand-computed cases (brackets, LTCG stacking, SS taxability, NIIT, RMD, gift/estate exemption). Golden-file projections for the demo households. Monte Carlo sanity checks: with zero volatility the result must equal the fixed-mode output, and a fixed seed must be reproducible.

@@ -7,6 +7,7 @@ import type {
   Account,
   Assumptions,
   Debt,
+  Holding,
   Household,
   HouseholdInfo,
   Id,
@@ -68,6 +69,39 @@ export interface ChildRef {
 export interface FamilyOverview {
   households: HouseholdEntry[];
   children: ChildRef[];
+  /** File name while someone else's file is open read-only. */
+  viewing: string | null;
+}
+
+/** Mirrors src-tauri/src/import.rs. */
+export interface ImportedAccount {
+  name: string;
+  numberLast4: string | null;
+  holdings: Holding[];
+  cash: number;
+  total: number;
+  account: Account;
+}
+
+export type ImportPreview =
+  | { kind: "parsed"; brokerage: string; accounts: ImportedAccount[] }
+  | { kind: "needsMapping"; columns: string[]; headerRow: number; sample: string[][] };
+
+export interface ColumnMapping {
+  headerRow: number;
+  symbol: number | null;
+  description: number | null;
+  shares: number | null;
+  price: number | null;
+  value: number | null;
+  costBasis: number | null;
+  account: number | null;
+}
+
+export interface ImportChoice {
+  account: Account;
+  /** Update this existing account instead of adding a new one. */
+  updateId: Id | null;
 }
 
 /** Money arriving in a linked child household from the parent's plan. Totals in today's dollars. */
@@ -168,6 +202,18 @@ export const api = {
   deleteChildHousehold: (id: number) => invoke<Household>("delete_child_household", { id }),
   setParentPlan: (plan: Id | null) => invoke<void>("set_parent_plan", { plan }),
   incomingSummary: (startYear: number) => invoke<IncomingSummary | null>("incoming_summary", { startYear }),
+
+  // Someone else's file, read-only.
+  viewBackup: (path: string, password: string | null) => invoke<Household>("view_backup", { path, password }),
+  closeView: () => invoke<Household>("close_view"),
+
+  // Brokerage imports and exports.
+  readImportFile: (path: string) => invoke<ImportPreview>("read_import_file", { path }),
+  readImportMapped: (path: string, mapping: ColumnMapping) =>
+    invoke<ImportPreview>("read_import_mapped", { path, mapping }),
+  applyImport: (choices: ImportChoice[]) => invoke<Household>("apply_import", { choices }),
+  writeTextFile: (path: string, contents: string) => invoke<void>("write_text_file", { path, contents }),
+  printPage: () => invoke<void>("print_page"),
   saveBackupSettings: (settings: BackupSettings) => invoke<BackupStatus>("save_backup_settings", { settings }),
 
   upsertPerson: (person: Person) => invoke<Household>("upsert_person", { person }),

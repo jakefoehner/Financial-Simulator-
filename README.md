@@ -137,6 +137,23 @@ Accounts can be **Private real estate fund**, **Private credit fund**, **Startup
 - These are planning assumptions (`engine/src/montecarlo.rs`, mirrored in `src/lib/simulation.ts`).
 - **Limits:** this is a planning estimate, not legal or tax advice. Confirm big gifting decisions with an estate attorney.
 
+## Importing, viewing and exporting
+- **Import from a brokerage file** (Accounts → Import from a file…, or ⌘I): reads positions exports from **Schwab, Fidelity, Vanguard, Merrill and Morgan Stanley** (`src-tauri/src/import.rs`).
+  - It finds the table by its column names, groups rows into accounts (by an account column, or by the title line above each table), and skips totals, pending activity and disclaimers.
+  - It also skips transaction tables that follow the positions.
+  - Money-market funds and bank sweeps count as cash. The account type is guessed from its name (Roth IRA, Rollover IRA, 401(k), Individual…).
+  - Each account can be added as new or used to **update** an existing one. Updating replaces its balance, cost basis, mix and positions, and keeps its name, owner and contributions.
+  - Files in other layouts get a "which column is which?" step.
+  - **Template** (`fixtures/imports/template.csv`): `Account,Account type,Symbol,Description,Shares,Price,Value,Cost basis`, one row per position. A row with no symbol and the description "Cash" is cash.
+  - Brokerages change their exports. If a real file doesn't import, the column step still works, and a sample with the numbers blanked lets the parser be updated. The test files in `fixtures/imports/` are made up, laid out like each brokerage's export.
+- **Positions** are stored on each account (`holdings`, a JSON column; migration 0010) and travel in backups. The balance and mix on the account are still what the forecast uses.
+- **View someone else's file** (Save & load → "View someone else's file without loading it…"): opens a backup read-only, in a temporary folder apart from your data.
+  - A banner offers **Close** or **Load it as my own…**.
+  - Every page works, but nothing can be changed; the app refuses edits while viewing.
+- **Exports:**
+  - **CSV** of accounts and positions (Accounts → Export…) and of the plan's year-by-year steady path (Forecast → CSV).
+  - **Report / PDF** (Forecast → Report / PDF): a printable summary of one plan for an estate attorney or CPA. It covers the household, the plan's decisions, the range of outcomes and chart, the family/estate card, and the assumptions and data sources. **Save as PDF…** opens the Mac print panel; choose PDF → Save as PDF.
+
 ## Searching
 The Scenarios page, the "Add a decision" picker and the Giving guide each have a search box. ⌘F focuses it, Esc clears it, and the text is kept while the app is open.
 - **How matching works:**

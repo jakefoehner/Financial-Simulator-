@@ -114,7 +114,7 @@ pub fn delete_person(conn: &Connection, id: Id) -> Result<()> {
 // --- Account ---------------------------------------------------------------
 
 const ACCOUNT_COLS: &str = "id, name, account_type, owner_id, balance, cost_basis, stocks_pct, bonds_pct, cash_pct,
-     annual_contribution, employer_match, notes, private_terms";
+     annual_contribution, employer_match, notes, private_terms, holdings";
 
 fn account_from_row(r: &Row) -> rusqlite::Result<Account> {
     Ok(Account {
@@ -131,6 +131,7 @@ fn account_from_row(r: &Row) -> rusqlite::Result<Account> {
         employer_match: r.get(10)?,
         notes: r.get(11)?,
         private: json_col(r, 12)?,
+        holdings: json_col(r, 13)?.unwrap_or_default(),
     })
 }
 
@@ -142,6 +143,13 @@ fn json_col<T: serde::de::DeserializeOwned>(r: &Row, idx: usize) -> rusqlite::Re
             .map_err(|e| rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e)))
     })
     .transpose()
+}
+
+fn holdings_json(a: &Account) -> Result<Option<String>> {
+    if a.holdings.is_empty() {
+        return Ok(None);
+    }
+    serde_json::to_string(&a.holdings).map(Some).map_err(|e| Error::Invalid(e.to_string()))
 }
 
 fn private_json(a: &Account) -> Result<Option<String>> {
@@ -159,7 +167,7 @@ pub(super) fn list_accounts(conn: &Connection) -> Result<Vec<Account>> {
 pub(super) fn insert_account(conn: &Connection, a: &Account) -> Result<Id> {
     conn.execute(
         &format!(
-            "INSERT INTO account ({ACCOUNT_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"
+            "INSERT INTO account ({ACCOUNT_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"
         ),
         params![
             a.id,
@@ -174,7 +182,8 @@ pub(super) fn insert_account(conn: &Connection, a: &Account) -> Result<Id> {
             a.annual_contribution,
             a.employer_match,
             a.notes,
-            private_json(a)?
+            private_json(a)?,
+            holdings_json(a)?
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -188,7 +197,7 @@ pub fn upsert_account(conn: &Connection, a: &Account) -> Result<Id> {
         "account",
         "UPDATE account SET name = ?2, account_type = ?3, owner_id = ?4, balance = ?5, cost_basis = ?6,
              stocks_pct = ?7, bonds_pct = ?8, cash_pct = ?9, annual_contribution = ?10, employer_match = ?11,
-             notes = ?12, private_terms = ?13
+             notes = ?12, private_terms = ?13, holdings = ?14
          WHERE id = ?1",
         params![
             id,
@@ -203,7 +212,8 @@ pub fn upsert_account(conn: &Connection, a: &Account) -> Result<Id> {
             a.annual_contribution,
             a.employer_match,
             a.notes,
-            private_json(a)?
+            private_json(a)?,
+            holdings_json(a)?
         ],
     )?;
     Ok(id)
@@ -468,6 +478,7 @@ mod tests {
             employer_match: 0.0,
             notes: String::new(),
             private: None,
+            holdings: Vec::new(),
         }
     }
 

@@ -1,4 +1,7 @@
+import { Download, FileText } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { api } from "../lib/api";
+import { forecastCsv, saveCsv } from "../lib/csv";
 import { Button, EmptyState, PageHeader } from "../components/Card";
 import type { DollarMode } from "../lib/projection";
 import { useApp } from "../lib/store";
@@ -75,6 +78,22 @@ export default function Results() {
               ]}
             />
             <DollarToggle mode={mode} onChange={setMode} />
+            <Button variant="ghost" onClick={() => go("report")}>
+              <FileText size={14} /> Report / PDF
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={async () => {
+                try {
+                  const p = await api.runProjection(startYear, plan);
+                  await saveCsv(`${household.info.name} – ${planName} – by year.csv`, forecastCsv(p));
+                } catch (e) {
+                  setError(String(e));
+                }
+              }}
+            >
+              <Download size={14} /> CSV
+            </Button>
           </>
         }
       />

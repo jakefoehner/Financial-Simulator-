@@ -64,6 +64,19 @@ export interface Account {
   notes: string;
   /** Terms for private funds and startups; null for every other type. */
   private: PrivateTerms | null;
+  /** Individual positions (from an import or entered by hand). */
+  holdings: Holding[];
+}
+
+/** Mirrors engine::model::Holding. */
+export interface Holding {
+  ticker: string;
+  description: string;
+  shares: number;
+  price: number;
+  costBasis: number | null;
+  /** YYYY-MM-DD the price is from. */
+  priceDate: string | null;
 }
 
 /** Mirrors engine::model::PrivateTerms. `balance` is today's value; `costBasis` is what was invested. */

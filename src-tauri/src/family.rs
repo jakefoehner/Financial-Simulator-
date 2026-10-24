@@ -20,6 +20,8 @@ pub struct Family {
     main: Connection,
     /// The child household being viewed, if not the main one.
     active: Option<(i64, Connection)>,
+    /// Set when this is someone else's file opened read-only: its file name.
+    pub read_only: Option<String>,
 }
 
 /// One household in the switcher.
@@ -77,7 +79,30 @@ impl Family {
     pub fn open(dir: &Path) -> db::Result<Family> {
         std::fs::create_dir_all(dir.join("children")).map_err(|e| Error::Invalid(e.to_string()))?;
         let main = db::open(&dir.join(MAIN_FILE))?;
-        Ok(Family { dir: dir.to_path_buf(), main, active: None })
+        Ok(Family { dir: dir.to_path_buf(), main, active: None, read_only: None })
+    }
+
+    /// Someone else's backup, opened read-only in its own temporary folder.
+    pub fn open_read_only(dir: &Path, households: &[HouseholdBackup], file_name: &str) -> db::Result<Family> {
+        let _ = std::fs::remove_dir_all(dir);
+        let mut f = Family::open(dir)?;
+        f.import_all(households)?;
+        f.read_only = Some(file_name.to_string());
+        Ok(f)
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// An error when this is a read-only view.
+    pub fn check_writable(&self) -> db::Result<()> {
+        match &self.read_only {
+            Some(_) => Err(Error::Invalid(
+                "This file is open read-only. Close it (or load it as your own) to make changes.".into(),
+            )),
+            None => Ok(()),
+        }
     }
 
     pub fn main_path(&self) -> PathBuf {
@@ -536,6 +561,21 @@ mod tests {
         assert!(h.incoming.iter().any(|t| t.cash > 140_000.0));
         let proj = projection::project(&h, None, 2026).unwrap();
         assert!(proj.years.iter().any(|y| y.received_from_parent > 140_000.0));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn someone_elses_file_opens_read_only() {
+        let dir = temp_dir("view");
+        let mut f = Family::open_read_only(&dir, &family(Demo::Retiree), "Pat.fsim").unwrap();
+        assert_eq!(f.read_only.as_deref(), Some("Pat.fsim"));
+        assert!(f.check_writable().is_err());
+        // Everything can still be looked at, including the child's household.
+        assert_eq!(f.list().unwrap().len(), 2);
+        let sam = f.list().unwrap()[1].id;
+        f.switch(sam).unwrap();
+        assert_eq!(db::load_household(f.conn()).unwrap().people[0].name, "Sam");
+        drop(f);
         let _ = std::fs::remove_dir_all(dir);
     }
 

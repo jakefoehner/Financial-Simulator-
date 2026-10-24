@@ -1,4 +1,5 @@
-import { Plus } from "lucide-react";
+import { Download, Plus, Upload } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Button, EmptyState, PageHeader, RecordList } from "../components/Card";
 import { MoneyField, NumberField, PercentField, Row, SelectField, TextField, Toggle } from "../components/fields";
 import { Sheet } from "../components/Sheet";
@@ -22,6 +23,8 @@ import {
   type PrivateTerms,
 } from "../lib/types";
 import { useEditor } from "../lib/useEditor";
+import { accountsCsv, saveCsv } from "../lib/csv";
+import { ImportSheet } from "./ImportSheet";
 
 const MIX_PRESETS: { label: string; stocks: number; bonds: number }[] = [
   { label: "All stocks", stocks: 1, bonds: 0 },
@@ -43,6 +46,7 @@ function newAccount(ownerId: Id | null): Account {
     employerMatch: 0,
     notes: "",
     private: null,
+    holdings: [],
   };
 }
 
@@ -82,6 +86,27 @@ export default function Accounts() {
   const ed = useEditor<Account>({ save: api.upsertAccount, remove: api.deleteAccount });
   const primaryId = people.find((p) => p.role === "primary")?.id ?? null;
   const total = accounts.reduce((s, a) => s + a.balance, 0);
+  const household = useApp((s) => s.household!);
+  const importRequest = useApp((s) => s.importRequest);
+  const setImportRequest = useApp((s) => s.setImportRequest);
+  const [importing, setImporting] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (importRequest) {
+      setImportRequest(false);
+      setImporting(true);
+    }
+  }, [importRequest, setImportRequest]);
+
+  const exportCsv = async () => {
+    setNote(null);
+    try {
+      const path = await saveCsv(`${household.info.name} – accounts.csv`, accountsCsv(household));
+      if (path) setNote(`Saved to ${path}`);
+    } catch (e) {
+      setNote(String(e));
+    }
+  };
 
   return (
     <>
@@ -89,16 +114,28 @@ export default function Accounts() {
         title="Accounts"
         subtitle="Everything you own: bank accounts, investments, retirement accounts, and property. Balances are what they're worth today."
         actions={
-          <Button variant="primary" onClick={() => ed.open(newAccount(primaryId))}>
-            <Plus size={16} /> Add account
-          </Button>
+          <>
+            <Button onClick={() => setImporting(true)}>
+              <Upload size={16} /> Import from a file…
+            </Button>
+            {accounts.length > 0 && (
+              <Button variant="ghost" onClick={() => void exportCsv()}>
+                <Download size={16} /> Export…
+              </Button>
+            )}
+            <Button variant="primary" onClick={() => ed.open(newAccount(primaryId))}>
+              <Plus size={16} /> Add account
+            </Button>
+          </>
         }
       />
+      {note && <p className="mb-3 text-xs text-[var(--muted)] select-text">{note}</p>}
+      {importing && <ImportSheet onClose={() => setImporting(false)} />}
 
       {accounts.length === 0 ? (
         <EmptyState
           title="No accounts yet"
-          body="Add your biggest accounts first. You can always come back for the small ones."
+          body="Add your biggest accounts first, or import them from a brokerage's positions file (Schwab, Fidelity, Vanguard, Merrill, Morgan Stanley). You can always come back for the small ones."
           action={
             <Button variant="primary" onClick={() => ed.open(newAccount(primaryId))}>
               Add an account

@@ -285,6 +285,32 @@ pub struct Account {
     /// Terms for private funds and startups (`None` for every other type).
     #[serde(default)]
     pub private: Option<PrivateTerms>,
+    /// Individual positions (from a brokerage import or entered by hand). Optional: the
+    /// balance and allocation above are what the forecast uses.
+    #[serde(default)]
+    pub holdings: Vec<Holding>,
+}
+
+/// One position in an account.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Holding {
+    /// Ticker symbol, upper case (empty for something without one, like a CD).
+    pub ticker: String,
+    pub description: String,
+    pub shares: f64,
+    /// Price per share when last updated.
+    pub price: f64,
+    /// Total cost basis of the position, if known.
+    pub cost_basis: Option<f64>,
+    /// When `price` was last updated (YYYY-MM-DD), if known.
+    pub price_date: Option<String>,
+}
+
+impl Holding {
+    pub fn value(&self) -> f64 {
+        self.shares * self.price
+    }
 }
 
 /// How a private investment pays out. `balance` is today's value and `cost_basis`
@@ -611,6 +637,12 @@ impl Account {
         }
         non_negative("Contribution", self.annual_contribution)?;
         non_negative("Employer match", self.employer_match)?;
+        for h in &self.holdings {
+            let what = if h.ticker.is_empty() { h.description.as_str() } else { h.ticker.as_str() };
+            if h.shares < 0.0 || h.price < 0.0 || h.cost_basis.is_some_and(|c| c < 0.0) {
+                return Err(format!("{what}: shares, price, and cost basis can't be negative."));
+            }
+        }
         if self.account_type.is_private() {
             self.private.as_ref().ok_or("Add the investment's payout terms.")?.validate()?;
         }
@@ -883,6 +915,7 @@ mod tests {
             employer_match: 0.0,
             notes: String::new(),
             private: None,
+            holdings: Vec::new(),
         }
     }
 

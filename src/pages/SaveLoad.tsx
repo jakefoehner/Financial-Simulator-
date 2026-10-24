@@ -85,7 +85,12 @@ export default function SaveLoad() {
             onClick={() => requestBackup("open")}
           />
         </div>
-        <p className="-mt-2 px-1 text-xs text-[var(--muted)]">Also in the File menu: ⌘S to save, ⌘O to load.</p>
+        <p className="-mt-2 px-1 text-xs text-[var(--muted)]">
+          Also in the File menu: ⌘S to save, ⌘O to load.{" "}
+          <button className="font-medium text-accent hover:underline" onClick={() => requestBackup("view")}>
+            View someone else's file without loading it…
+          </button>
+        </p>
 
         <Card title="Households in this app">
           <p className="mb-3 text-sm text-[var(--muted)]">

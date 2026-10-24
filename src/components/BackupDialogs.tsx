@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type BackupInfo, type FamilyOverview, type LoadTarget } from "../lib/api";
 import { BACKUP_FILTERS, backupContents, defaultBackupName, passwordProblem, savedAtLabel } from "../lib/backup";
 import { activeHousehold, useApp } from "../lib/store";
@@ -54,6 +54,8 @@ export function BackupDialogs() {
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
   const [loadAs, setLoadAs] = useState("everything");
+  // Opening a file to look at (read-only) rather than to load.
+  const viewOnly = useRef(false);
 
   // File menu → the same flows as the Settings buttons.
   useEffect(() => {
@@ -61,6 +63,10 @@ export function BackupDialogs() {
     listen<string>("menu", (e) => {
       if (e.payload === "save_backup") requestBackup("save");
       if (e.payload === "open_backup") requestBackup("open");
+      if (e.payload === "import_file") {
+        useApp.getState().go("accounts");
+        useApp.getState().setImportRequest(true);
+      }
     })
       .then((u) => (unlisten = u))
       .catch(() => {});
@@ -79,7 +85,12 @@ export function BackupDialogs() {
   const inspect = async (path: string, pw: string | null) => {
     const preview = await api.inspectBackup(path, pw);
     if (preview.needsPassword) setStep({ kind: "password", path });
-    else if (preview.info) {
+    else if (preview.info && viewOnly.current) {
+      await api.viewBackup(path, pw);
+      await useApp.getState().load();
+      go("overview");
+      close();
+    } else if (preview.info) {
       // A child's own file most likely belongs to that child.
       const name = preview.info.households[0];
       const child = useApp.getState().family?.children.find((c) => c.name === name);
@@ -92,6 +103,7 @@ export function BackupDialogs() {
     if (!request) return;
     requestBackup(null);
     close();
+    viewOnly.current = request === "view";
     if (request === "save" || request === "saveOne") {
       setStep({ kind: "save", scope: request === "saveOne" ? "household" : "family" });
       return;

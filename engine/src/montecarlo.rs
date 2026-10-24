@@ -407,6 +407,7 @@ mod tests {
                 employer_match: 0.0,
                 notes: String::new(),
                 private: None,
+                holdings: Vec::new(),
             }],
             ..Default::default()
         }
