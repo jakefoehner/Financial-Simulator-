@@ -27,10 +27,10 @@ describe("afrFor", () => {
 describe("newEvent", () => {
   it("has a default for every choice, starting at the given age", () => {
     for (const c of EVENT_CHOICES) {
-      const e = newEvent(c.type, { firstChild: 2, age: 59, facts });
+      const e = newEvent(c.type, { firstChild: 2, firstGiftAccount: 1, age: 59, facts });
       expect(e.type).toBe(c.type);
     }
-    const loan = newEvent("family_loan", { firstChild: 2, age: 59, facts });
+    const loan = newEvent("family_loan", { firstChild: 2, firstGiftAccount: 1, age: 59, facts });
     expect(loan.type === "family_loan" && loan.loan.rate).toBe(0.0552);
   });
 });
@@ -59,6 +59,15 @@ describe("eventSummary", () => {
       "Ages 60–64 · Convert $100K a year to Roth",
     );
     expect(summary({ type: "social_security_age", age: 70 })).toBe("Start Social Security at 70");
+    expect(
+      eventSummary(
+        { type: "gift_assets", to: null, accountId: 1, age: 59, amount: 1_000_000 },
+        (id) => names[id],
+        formatUsdCompact,
+        formatPercent,
+        () => "Taxable brokerage",
+      ),
+    ).toBe("Age 59 · Give each child $1M from Taxable brokerage");
   });
 
   it("orders decisions by when they start", () => {

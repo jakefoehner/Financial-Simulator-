@@ -21,11 +21,12 @@ const empty: Household = {
 describe("summarize", () => {
   it("totals the retiree demo", () => {
     const s = summarize(retiree, 2026);
-    expect(s.totalAssets).toBe(16_550_000);
+    expect(s.totalAssets).toBe(18_400_000);
     expect(s.realEstate).toBe(2_700_000);
     expect(s.investable).toBe(13_850_000);
+    expect(s.privateInvestments).toBe(1_850_000);
     expect(s.totalDebts).toBe(300_000);
-    expect(s.netWorth).toBe(16_250_000);
+    expect(s.netWorth).toBe(18_100_000);
     expect(s.currentAnnualIncome).toBe(70_000); // rental only; Social Security not claimed yet
     expect(s.annualDebtPayments).toBe(27_600);
   });

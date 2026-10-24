@@ -30,7 +30,8 @@ fn get_assumptions(conn: &Connection) -> Result<Assumptions> {
     Ok(conn.query_row(
         "SELECT stocks_return, bonds_return, cash_return, real_estate_growth, inflation, stock_dividend_yield,
                 simulations, steady_inflation, heir_income_tax_rate, exemption_cut_enabled, exemption_cut_amount,
-                exemption_cut_year, estate_age
+                exemption_cut_year, estate_age, heir_capital_gains_rate, tax_rise_enabled, tax_rise_year,
+                income_tax_increase, capital_gains_increase
          FROM assumptions WHERE id = 1",
         [],
         |r| {
@@ -48,6 +49,11 @@ fn get_assumptions(conn: &Connection) -> Result<Assumptions> {
                 exemption_cut_amount: r.get(10)?,
                 exemption_cut_year: r.get(11)?,
                 estate_age: r.get(12)?,
+                heir_capital_gains_rate: r.get(13)?,
+                tax_rise_enabled: r.get(14)?,
+                tax_rise_year: r.get(15)?,
+                income_tax_increase: r.get(16)?,
+                capital_gains_increase: r.get(17)?,
             })
         },
     )?)
@@ -59,7 +65,8 @@ pub fn save_assumptions(conn: &Connection, a: &Assumptions) -> Result<()> {
         "UPDATE assumptions SET stocks_return = ?1, bonds_return = ?2, cash_return = ?3, real_estate_growth = ?4,
              inflation = ?5, stock_dividend_yield = ?6, simulations = ?7, steady_inflation = ?8,
              heir_income_tax_rate = ?9, exemption_cut_enabled = ?10, exemption_cut_amount = ?11,
-             exemption_cut_year = ?12, estate_age = ?13
+             exemption_cut_year = ?12, estate_age = ?13, heir_capital_gains_rate = ?14, tax_rise_enabled = ?15,
+             tax_rise_year = ?16, income_tax_increase = ?17, capital_gains_increase = ?18
          WHERE id = 1",
         params![
             a.stocks_return,
@@ -74,7 +81,12 @@ pub fn save_assumptions(conn: &Connection, a: &Assumptions) -> Result<()> {
             a.exemption_cut_enabled,
             a.exemption_cut_amount,
             a.exemption_cut_year,
-            a.estate_age
+            a.estate_age,
+            a.heir_capital_gains_rate,
+            a.tax_rise_enabled,
+            a.tax_rise_year,
+            a.income_tax_increase,
+            a.capital_gains_increase
         ],
     )?;
     Ok(())

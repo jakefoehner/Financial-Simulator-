@@ -6,7 +6,7 @@ import { api } from "../../lib/api";
 import { EVENT_CHOICES, eventAge, eventSummary, newEvent } from "../../lib/events";
 import { formatPercent, formatUsdCompact } from "../../lib/format";
 import { useApp } from "../../lib/store";
-import { ageOf, type Event, type EventType, type Household, type Scenario } from "../../lib/types";
+import { ageOf, giftableInKind, type Event, type EventType, type Household, type Scenario } from "../../lib/types";
 import { useTaxFacts } from "../../lib/useTaxFacts";
 import { EventSheet } from "./EventSheet";
 
@@ -29,6 +29,8 @@ export default function ScenarioEditor({
   const [saving, setSaving] = useState(false);
 
   const kids = household.people.filter((p) => p.role === "child");
+  const giftAccounts = household.accounts.filter((a) => giftableInKind(a.accountType));
+  const accountName = (id: number) => household.accounts.find((a) => a.id === id)?.name ?? "an account";
   const primary = household.people.find((p) => p.role === "primary");
   const nextAge = primary ? ageOf(primary) + 1 : 60;
   const nameOf = (id: number) => household.people.find((p) => p.id === id)?.name ?? "someone removed";
@@ -39,7 +41,15 @@ export default function ScenarioEditor({
   const start = (type: EventType) => {
     if (!facts) return;
     setChoosing(false);
-    setEditing({ index: null, event: newEvent(type, { firstChild: kids[0]?.id ?? null, age: nextAge, facts }) });
+    setEditing({
+      index: null,
+      event: newEvent(type, {
+        firstChild: kids[0]?.id ?? null,
+        firstGiftAccount: giftAccounts[0]?.id ?? null,
+        age: nextAge,
+        facts,
+      }),
+    });
   };
 
   const commit = (e: Event) => {
@@ -111,7 +121,9 @@ export default function ScenarioEditor({
         {choosing && (
           <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-3">
             {EVENT_CHOICES.map((c) => {
-              const disabled = needsKids && ["home_help", "cash_gift", "family_loan"].includes(c.type);
+              const disabled =
+                (needsKids && ["home_help", "cash_gift", "family_loan", "gift_assets"].includes(c.type)) ||
+                (c.type === "gift_assets" && giftAccounts.length === 0);
               return (
                 <button
                   key={c.type}
@@ -139,7 +151,7 @@ export default function ScenarioEditor({
                   onClick={() => setEditing({ index, event })}
                   className="w-full rounded-lg border border-[var(--border)] px-4 py-3 text-left text-sm transition hover:border-accent"
                 >
-                  {eventSummary(event, nameOf, formatUsdCompact, formatPercent)}
+                  {eventSummary(event, nameOf, formatUsdCompact, formatPercent, accountName)}
                 </button>
               </li>
             ))}
@@ -160,6 +172,7 @@ export default function ScenarioEditor({
           initial={editing.event}
           isNew={editing.index == null}
           kids={kids}
+          giftAccounts={giftAccounts}
           facts={facts}
           onDone={commit}
           onRemove={editing.index != null ? () => remove(editing.index!) : undefined}

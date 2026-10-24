@@ -42,6 +42,12 @@ pub struct TaxInput {
     pub filers_65_plus: u32,
     pub children_under_17: u32,
     pub state_rate: f64,
+    /// Net capital loss used against ordinary income this year (up to $3,000).
+    pub capital_loss_deduction: f64,
+    /// "What if taxes rise": added to every ordinary bracket rate (0.05 = 5 points).
+    pub ordinary_rate_increase: f64,
+    /// ...and to the 15% / 20% capital-gains rates.
+    pub gains_rate_increase: f64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -95,7 +101,8 @@ pub fn compute(t: &TaxTables, i: &TaxInput) -> TaxResult {
         + i.interest
         + i.qualified_dividends
         + i.long_term_gains
-        + i.traditional_distributions;
+        + i.traditional_distributions
+        - i.capital_loss_deduction;
     let taxable_ss = taxable_social_security(t, s, income_before_ss, i.social_security_benefits);
     let agi = (income_before_ss + taxable_ss).max(0.0);
 
@@ -113,7 +120,7 @@ pub fn compute(t: &TaxTables, i: &TaxInput) -> TaxResult {
     let preferential = (i.qualified_dividends + i.long_term_gains).min(taxable_income);
     let ordinary_income = taxable_income - preferential;
     let brackets = t.ordinary_brackets.get(s);
-    let ordinary_tax = bracket_tax(brackets, ordinary_income, idx);
+    let ordinary_tax = bracket_tax(brackets, ordinary_income, idx) + i.ordinary_rate_increase * ordinary_income;
 
     let zero_top = t.capital_gains.zero_rate_up_to.get(s) * idx;
     let fifteen_top = t.capital_gains.fifteen_rate_up_to.get(s) * idx;
@@ -121,7 +128,7 @@ pub fn compute(t: &TaxTables, i: &TaxInput) -> TaxResult {
     let at_fifteen =
         (taxable_income.min(fifteen_top) - ordinary_income.max(zero_top)).clamp(0.0, preferential - at_zero);
     let at_twenty = preferential - at_zero - at_fifteen;
-    let capital_gains_tax = 0.15 * at_fifteen + 0.20 * at_twenty;
+    let capital_gains_tax = (0.15 + i.gains_rate_increase) * at_fifteen + (0.20 + i.gains_rate_increase) * at_twenty;
 
     // --- Credits ---
     let ctc = &t.child_tax_credit;
@@ -156,7 +163,7 @@ pub fn compute(t: &TaxTables, i: &TaxInput) -> TaxResult {
         state_tax,
         federal_total,
         total: federal_total + state_tax,
-        marginal_rate: marginal_rate(brackets, ordinary_income, idx),
+        marginal_rate: marginal_rate(brackets, ordinary_income, idx) + i.ordinary_rate_increase,
     }
 }
 
@@ -340,6 +347,27 @@ mod tests {
             &TaxInput { wages_by_person: vec![102_500.0], index: 1.025, ..base(FilingStatus::Single) },
         );
         close(r.income_tax, 13_170.0 * 1.025);
+    }
+
+    #[test]
+    fn tax_rise_adds_points_to_every_bracket_and_gains_rate() {
+        // $100k wages: taxable 83,900. +5 points on all of it = +4,195.
+        let plain = TaxInput { wages_by_person: vec![100_000.0], ..base(FilingStatus::Single) };
+        let higher = TaxInput { ordinary_rate_increase: 0.05, ..plain.clone() };
+        close(compute(tables(), &higher).income_tax - compute(tables(), &plain).income_tax, 4_195.0);
+        assert!((compute(tables(), &higher).marginal_rate - 0.27).abs() < 1e-9);
+        // $500k of gains on top of $300k wages: gains in the 15%/20% bands each rise 5 points.
+        let gains =
+            TaxInput { wages_by_person: vec![300_000.0], long_term_gains: 500_000.0, ..base(FilingStatus::Single) };
+        let gains_up = TaxInput { gains_rate_increase: 0.05, ..gains.clone() };
+        close(compute(tables(), &gains_up).capital_gains_tax - compute(tables(), &gains).capital_gains_tax, 25_000.0);
+    }
+
+    #[test]
+    fn capital_loss_deduction_lowers_income() {
+        let plain = TaxInput { wages_by_person: vec![100_000.0], ..base(FilingStatus::Single) };
+        let with_loss = TaxInput { capital_loss_deduction: 3_000.0, ..plain.clone() };
+        close(compute(tables(), &plain).agi - compute(tables(), &with_loss).agi, 3_000.0);
     }
 
     #[test]

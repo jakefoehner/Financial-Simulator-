@@ -85,8 +85,15 @@ export default function FamilyCard({ estate, range }: { estate: EstateResult; ra
         <li>
           Other inherited assets get a "stepped-up" cost basis, so no capital-gains tax on past growth. Gifts keep your
           original basis.
-          {hasGifts && " Gifts are shown grown to that age at your portfolio's return, as if your kids invested them."}
+          {hasGifts &&
+            ` Gifts are shown grown to that age at your portfolio's return, as if your kids invested them, minus the ${formatPercent(estate.heirCapitalGainsRate, 0)} capital-gains tax they'd owe selling (${formatUsdCompact(estate.heirsCapitalGainsTaxReal)} in all).`}
         </li>
+        {estate.antiClawbackApplies && (
+          <li>
+            <strong className="font-medium text-[var(--text)]">Your earlier gifts are protected:</strong> they used the
+            exemption before it was cut, so they aren't taxed again at death (the IRS "anti-clawback" rule).
+          </li>
+        )}
         <li>Federal only; Texas has no estate or inheritance tax. A planning estimate, not legal or tax advice.</li>
       </ul>
     </Card>

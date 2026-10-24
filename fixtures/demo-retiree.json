@@ -136,6 +136,72 @@
       "annualContribution": 0,
       "employerMatch": 0,
       "notes": ""
+    },
+    {
+      "id": 8,
+      "name": "Multifamily real estate fund",
+      "accountType": "real_estate_fund",
+      "ownerId": 1,
+      "balance": 1050000,
+      "costBasis": 1000000,
+      "stocksPct": 0,
+      "bondsPct": 0,
+      "cashPct": 0,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": "",
+      "private": {
+        "cashYield": 0.08,
+        "taxableShare": 0.5,
+        "exitYear": 2031,
+        "exitMultiple": 1.5,
+        "companies": 1,
+        "qsbs": false
+      }
+    },
+    {
+      "id": 9,
+      "name": "Private credit fund",
+      "accountType": "private_credit",
+      "ownerId": 1,
+      "balance": 500000,
+      "costBasis": 500000,
+      "stocksPct": 0,
+      "bondsPct": 0,
+      "cashPct": 0,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": "",
+      "private": {
+        "cashYield": 0.085,
+        "taxableShare": 1.0,
+        "exitYear": 2030,
+        "exitMultiple": 1.0,
+        "companies": 1,
+        "qsbs": false
+      }
+    },
+    {
+      "id": 10,
+      "name": "Startup investments",
+      "accountType": "startup",
+      "ownerId": 1,
+      "balance": 300000,
+      "costBasis": 300000,
+      "stocksPct": 0,
+      "bondsPct": 0,
+      "cashPct": 0,
+      "annualContribution": 0,
+      "employerMatch": 0,
+      "notes": "",
+      "private": {
+        "cashYield": 0.0,
+        "taxableShare": 1.0,
+        "exitYear": 2034,
+        "exitMultiple": 2.0,
+        "companies": 6,
+        "qsbs": true
+      }
     }
   ],
   "income": [
@@ -163,22 +229,47 @@
     }
   ],
   "oneTimeExpenses": [
-    { "id": 1, "name": "Roof replacement", "year": 2027, "amount": 45000 },
-    { "id": 2, "name": "New car", "year": 2028, "amount": 80000 }
+    {
+      "id": 1,
+      "name": "Roof replacement",
+      "year": 2027,
+      "amount": 45000
+    },
+    {
+      "id": 2,
+      "name": "New car",
+      "year": 2028,
+      "amount": 80000
+    }
   ],
   "scenarios": [
     {
       "id": 1,
       "name": "Help Sam with a down payment",
       "notes": "A one-time gift toward Sam's first home.",
-      "events": [{ "type": "home_help", "to": 2, "age": 59, "gift": 150000, "loan": null }]
+      "events": [
+        {
+          "type": "home_help",
+          "to": 2,
+          "age": 59,
+          "gift": 150000,
+          "loan": null
+        }
+      ]
     },
     {
       "id": 2,
       "name": "Yearly gifts to both kids",
       "notes": "The yearly gift-tax exclusion to each child for 20 years.",
       "events": [
-        { "type": "cash_gift", "to": null, "amount": 0, "fromAge": 59, "years": 20, "maxAnnualExclusion": true }
+        {
+          "type": "cash_gift",
+          "to": null,
+          "amount": 0,
+          "fromAge": 59,
+          "years": 20,
+          "maxAnnualExclusion": true
+        }
       ]
     },
     {
@@ -191,7 +282,42 @@
           "to": 3,
           "age": 60,
           "gift": 100000,
-          "loan": { "amount": 400000, "rate": 0.0552, "years": 15, "interestOnly": false, "forgivePerYear": 19000 }
+          "loan": {
+            "amount": 400000,
+            "rate": 0.0552,
+            "years": 15,
+            "interestOnly": false,
+            "forgivePerYear": 19000
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Give each kid $1M of stock",
+      "notes": "Shares from the brokerage account; the kids keep your cost basis.",
+      "events": [
+        {
+          "type": "gift_assets",
+          "to": null,
+          "accountId": 1,
+          "age": 59,
+          "amount": 1000000
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Big gift now: $2.5M to each kid",
+      "notes": "Locks in $5M of the lifetime exemption in case it's cut later.",
+      "events": [
+        {
+          "type": "cash_gift",
+          "to": null,
+          "amount": 2500000,
+          "fromAge": 59,
+          "years": 1,
+          "maxAnnualExclusion": false
         }
       ]
     }

@@ -71,6 +71,10 @@ string_enum!(
         Espp => "espp",
         Options => "options",
         LlcInterest => "llc_interest",
+        RealEstateFund => "real_estate_fund",
+        PrivateCredit => "private_credit",
+        Startup => "startup",
+        OtherAlternative => "other_alternative",
     }
 );
 
@@ -78,6 +82,23 @@ impl AccountType {
     /// Whether a stocks/bonds/cash mix is meaningful for this account.
     pub fn has_allocation(self) -> bool {
         !matches!(self, AccountType::Checking | AccountType::Savings | AccountType::RealEstate | AccountType::Pension)
+            && !self.is_private()
+    }
+
+    /// Private funds and startups: illiquid until they pay out, with their own terms.
+    pub fn is_private(self) -> bool {
+        matches!(
+            self,
+            AccountType::RealEstateFund
+                | AccountType::PrivateCredit
+                | AccountType::Startup
+                | AccountType::OtherAlternative
+        )
+    }
+
+    /// Ordinary taxable investments that can be given to someone "in kind".
+    pub fn giftable_in_kind(self) -> bool {
+        matches!(self, AccountType::Taxable | AccountType::Crypto | AccountType::Rsu | AccountType::Espp)
     }
 
     /// Whether gains are taxed on sale, so cost basis matters.
@@ -91,7 +112,7 @@ impl AccountType {
                 | AccountType::Espp
                 | AccountType::Options
                 | AccountType::LlcInterest
-        )
+        ) || self.is_private()
     }
 }
 
@@ -185,6 +206,15 @@ pub struct Assumptions {
     pub exemption_cut_year: i32,
     /// Age of the primary person at which to estimate the estate. `None` = the plan's last year.
     pub estate_age: Option<u32>,
+    /// Capital-gains rate the kids are assumed to pay when they sell gifted assets
+    /// (gifts keep your cost basis; inherited assets are stepped up).
+    pub heir_capital_gains_rate: f64,
+    /// "What if taxes rise": from `tax_rise_year` on, every income-tax bracket rises by
+    /// `income_tax_increase` and the 15%/20% capital-gains rates by `capital_gains_increase`.
+    pub tax_rise_enabled: bool,
+    pub tax_rise_year: i32,
+    pub income_tax_increase: f64,
+    pub capital_gains_increase: f64,
 }
 
 impl Default for Assumptions {
@@ -203,6 +233,11 @@ impl Default for Assumptions {
             exemption_cut_amount: 7_000_000.0,
             exemption_cut_year: 2030,
             estate_age: None,
+            heir_capital_gains_rate: 0.15,
+            tax_rise_enabled: false,
+            tax_rise_year: 2030,
+            income_tax_increase: 0.05,
+            capital_gains_increase: 0.05,
         }
     }
 }
@@ -242,6 +277,65 @@ pub struct Account {
     /// Yearly employer match (today's dollars).
     pub employer_match: f64,
     pub notes: String,
+    /// Terms for private funds and startups (`None` for every other type).
+    #[serde(default)]
+    pub private: Option<PrivateTerms>,
+}
+
+/// How a private investment pays out. `balance` is today's value and `cost_basis`
+/// what was invested.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivateTerms {
+    /// Cash paid out each year, as a share of what was invested.
+    pub cash_yield: f64,
+    /// Share of those payouts that is taxable income (real estate funds are often
+    /// partly sheltered by depreciation).
+    pub taxable_share: f64,
+    /// Calendar year it sells / returns capital. `None` = held for the whole plan.
+    pub exit_year: Option<i32>,
+    /// What it pays at exit, as a multiple of what was invested (1.5 = 1.5×).
+    /// For startups this is the *expected* multiple across all companies.
+    pub exit_multiple: f64,
+    /// Startups: how many separate companies (more companies = less all-or-nothing).
+    pub companies: u32,
+    /// Startups: gains may qualify for the QSBS exclusion (Section 1202).
+    pub qsbs: bool,
+}
+
+impl PrivateTerms {
+    /// Typical starting terms for each private type; the user edits them.
+    pub fn default_for(t: AccountType, start_year: i32) -> PrivateTerms {
+        let base = PrivateTerms {
+            cash_yield: 0.0,
+            taxable_share: 1.0,
+            exit_year: Some(start_year + 7),
+            exit_multiple: 1.5,
+            companies: 1,
+            qsbs: false,
+        };
+        match t {
+            AccountType::RealEstateFund => PrivateTerms { cash_yield: 0.08, taxable_share: 0.5, ..base },
+            AccountType::PrivateCredit => {
+                PrivateTerms { cash_yield: 0.085, exit_year: Some(start_year + 5), exit_multiple: 1.0, ..base }
+            }
+            AccountType::Startup => {
+                PrivateTerms { exit_year: Some(start_year + 8), exit_multiple: 2.0, companies: 5, ..base }
+            }
+            _ => base,
+        }
+    }
+
+    pub fn validate(&self) -> Validation {
+        in_range("Yearly cash payout", self.cash_yield, 0.0, 0.5)?;
+        in_range("Taxable share of payouts", self.taxable_share, 0.0, 1.0)?;
+        in_range("Payout multiple", self.exit_multiple, 0.0, 100.0)?;
+        in_range("Number of companies", self.companies, 1, 500)?;
+        if let Some(y) = self.exit_year {
+            in_range("Exit year", y, 1900, 2200)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -345,6 +439,15 @@ pub enum Event {
         age: u32,
         loan: LoanTerms,
     },
+    /// Give investments ("put stock in the kids' names"): `amount` (today's dollars, at
+    /// market value) from account `account_id` to one child or each child. The kids
+    /// keep your cost basis.
+    GiftAssets {
+        to: Option<Id>,
+        account_id: Id,
+        age: u32,
+        amount: f64,
+    },
     SocialSecurityAge {
         age: u32,
     },
@@ -420,6 +523,9 @@ impl Account {
         }
         non_negative("Contribution", self.annual_contribution)?;
         non_negative("Employer match", self.employer_match)?;
+        if self.account_type.is_private() {
+            self.private.as_ref().ok_or("Add the investment's payout terms.")?.validate()?;
+        }
         if self.account_type.has_allocation() {
             for (field, v) in [("Stocks", self.stocks_pct), ("Bonds", self.bonds_pct), ("Cash", self.cash_pct)] {
                 in_range(field, v, 0.0, 1.0)?;
@@ -484,6 +590,10 @@ impl Assumptions {
         if let Some(age) = self.estate_age {
             in_range("Estate age", age, 50, 120)?;
         }
+        in_range("Kids' capital-gains rate", self.heir_capital_gains_rate, 0.0, 0.5)?;
+        in_range("Year taxes rise", self.tax_rise_year, 2026, 2100)?;
+        in_range("Income-tax increase", self.income_tax_increase, 0.0, 0.3)?;
+        in_range("Capital-gains increase", self.capital_gains_increase, 0.0, 0.3)?;
         Ok(())
     }
 }
@@ -498,8 +608,8 @@ impl LoanTerms {
 }
 
 impl Event {
-    /// Checks the event's own numbers and that any child it names is a child in `people`.
-    pub fn validate(&self, people: &[Person]) -> Validation {
+    /// Checks the event's own numbers and that any child or account it names exists.
+    pub fn validate(&self, people: &[Person], accounts: &[Account]) -> Validation {
         let child = |id: Id| -> Validation {
             if people.iter().any(|p| p.id == Some(id) && p.role == Role::Child) {
                 Ok(())
@@ -533,6 +643,18 @@ impl Event {
                 age(*a)?;
                 loan.validate()
             }
+            Event::GiftAssets { to, account_id, age: a, amount } => {
+                if let Some(id) = to {
+                    child(*id)?;
+                } else if !people.iter().any(|p| p.role == Role::Child) {
+                    return Err("Add your children on the People page first.".into());
+                }
+                if !accounts.iter().any(|x| x.id == Some(*account_id) && x.account_type.giftable_in_kind()) {
+                    return Err("Pick a brokerage or stock account to give from.".into());
+                }
+                age(*a)?;
+                non_negative("Amount", *amount)
+            }
             Event::SocialSecurityAge { age } => in_range("Social Security claim age", *age, 62, 70),
             Event::SpendingChange { from_age, annual_amount } => {
                 age(*from_age)?;
@@ -553,17 +675,17 @@ impl Event {
     pub fn recipient(&self) -> Option<Id> {
         match self {
             Event::HomeHelp { to, .. } | Event::FamilyLoan { to, .. } => Some(*to),
-            Event::CashGift { to, .. } => *to,
+            Event::CashGift { to, .. } | Event::GiftAssets { to, .. } => *to,
             _ => None,
         }
     }
 }
 
 impl Scenario {
-    pub fn validate(&self, people: &[Person]) -> Validation {
+    pub fn validate(&self, people: &[Person], accounts: &[Account]) -> Validation {
         non_empty("Scenario name", &self.name)?;
         for e in &self.events {
-            e.validate(people)?;
+            e.validate(people, accounts)?;
         }
         Ok(())
     }
@@ -590,7 +712,7 @@ impl Household {
             x.validate().map_err(|e| format!("{}: {e}", x.name))?;
         }
         for sc in &self.scenarios {
-            sc.validate(&self.people).map_err(|e| format!("{}: {e}", sc.name))?;
+            sc.validate(&self.people, &self.accounts).map_err(|e| format!("{}: {e}", sc.name))?;
         }
         Ok(())
     }
@@ -618,6 +740,7 @@ mod tests {
             annual_contribution: 0.0,
             employer_match: 0.0,
             notes: String::new(),
+            private: None,
         }
     }
 

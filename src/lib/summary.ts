@@ -1,9 +1,11 @@
-import type { Household } from "./types";
+import { isPrivate, type Household } from "./types";
 
 export interface Summary {
   totalAssets: number;
   investable: number;
   realEstate: number;
+  /** Private funds and startups: in net worth, not spendable until they pay out. */
+  privateInvestments: number;
   totalDebts: number;
   netWorth: number;
   /** Yearly income currently being received (not future streams). */
@@ -22,6 +24,7 @@ export interface SetupStep {
 export function summarize(h: Household, year = new Date().getFullYear()): Summary {
   const totalAssets = sum(h.accounts.map((a) => a.balance));
   const realEstate = sum(h.accounts.filter((a) => a.accountType === "real_estate").map((a) => a.balance));
+  const privateInvestments = sum(h.accounts.filter((a) => isPrivate(a.accountType)).map((a) => a.balance));
   const totalDebts = sum(h.debts.map((d) => d.balance));
 
   const primary = h.people.find((p) => p.role === "primary") ?? h.people[0];
@@ -39,8 +42,9 @@ export function summarize(h: Household, year = new Date().getFullYear()): Summar
 
   return {
     totalAssets,
-    investable: totalAssets - realEstate,
+    investable: totalAssets - realEstate - privateInvestments,
     realEstate,
+    privateInvestments,
     totalDebts,
     netWorth: totalAssets - totalDebts,
     currentAnnualIncome: sum(activeIncome.map((i) => i.annualAmount)) + sum(socialSecurity),

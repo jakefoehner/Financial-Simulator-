@@ -3,7 +3,7 @@ import { api } from "./api";
 import type { Household, Id } from "./types";
 
 export type Section =
-  "overview" | "people" | "accounts" | "income" | "debts" | "spending" | "scenarios" | "results" | "settings";
+  "overview" | "people" | "accounts" | "income" | "debts" | "spending" | "scenarios" | "guide" | "results" | "settings";
 
 interface AppStore {
   section: Section;

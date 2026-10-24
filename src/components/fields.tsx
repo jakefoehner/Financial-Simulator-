@@ -198,6 +198,7 @@ export function NumberField({
   onChange,
   optional,
   placeholder,
+  decimal,
 }: {
   label: string;
   hint?: ReactNode;
@@ -205,7 +206,10 @@ export function NumberField({
   onChange: (v: number | null) => void;
   optional?: boolean;
   placeholder?: string;
+  /** Allow decimals (e.g. 1.5); whole numbers otherwise. */
+  decimal?: boolean;
 }) {
+  const pattern = decimal ? /^\s*-?\d*\.?\d+\s*$/ : /^\s*-?\d+\s*$/;
   return (
     <Field label={label} hint={hint}>
       {(id) => (
@@ -214,7 +218,7 @@ export function NumberField({
           value={value}
           onChange={onChange}
           format={String}
-          parse={(s) => (/^\s*-?\d+\s*$/.test(s) ? Number(s) : NaN)}
+          parse={(s) => (pattern.test(s) ? Number(s) : NaN)}
           optional={optional}
           placeholder={placeholder}
         />

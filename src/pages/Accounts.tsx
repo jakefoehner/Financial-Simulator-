@@ -1,6 +1,6 @@
 import { Plus } from "lucide-react";
 import { Button, EmptyState, PageHeader, RecordList } from "../components/Card";
-import { MoneyField, PercentField, Row, SelectField, TextField } from "../components/fields";
+import { MoneyField, NumberField, PercentField, Row, SelectField, TextField, Toggle } from "../components/fields";
 import { Sheet } from "../components/Sheet";
 import { api } from "../lib/api";
 import { formatUsd } from "../lib/format";
@@ -9,7 +9,9 @@ import {
   ACCOUNT_GROUPS,
   ACCOUNT_TYPE_LABELS,
   defaultAllocation,
+  defaultPrivateTerms,
   hasAllocation,
+  isPrivate,
   hasEmployerMatch,
   takesContributions,
   tracksCostBasis,
@@ -17,6 +19,7 @@ import {
   type AccountType,
   type Id,
   type Person,
+  type PrivateTerms,
 } from "../lib/types";
 import { useEditor } from "../lib/useEditor";
 
@@ -39,6 +42,7 @@ function newAccount(ownerId: Id | null): Account {
     annualContribution: 0,
     employerMatch: 0,
     notes: "",
+    private: null,
   };
 }
 
@@ -53,6 +57,8 @@ export function withType(a: Account, t: AccountType): Account {
     costBasis: tracksCostBasis(t) ? a.costBasis : null,
     annualContribution: takesContributions(t) ? a.annualContribution : 0,
     employerMatch: hasEmployerMatch(t) ? a.employerMatch : 0,
+    // Private types carry payout terms; keep them if the type didn't change, else start from typical terms.
+    private: isPrivate(t) ? (a.accountType === t && a.private ? a.private : defaultPrivateTerms(t)) : null,
   };
 }
 
@@ -61,6 +67,11 @@ function ownerName(people: Person[], id: Id | null): string {
 }
 
 function mixLabel(a: Account): string {
+  if (a.private) {
+    const p = a.private;
+    const cash = p.cashYield > 0 ? `${Number((p.cashYield * 100).toFixed(1))}% cash · ` : "";
+    return p.exitYear ? `${cash}pays out ${p.exitYear} at ${p.exitMultiple}×` : `${cash}held`;
+  }
   if (!hasAllocation(a.accountType)) return "—";
   const pct = (v: number) => Math.round(v * 100);
   return `${pct(a.stocksPct)} / ${pct(a.bondsPct)} / ${pct(a.cashPct)}`;
@@ -114,7 +125,11 @@ export default function Accounts() {
                     { header: "Name", cell: (a) => <span className="font-medium">{a.name}</span> },
                     { header: "Type", cell: (a) => ACCOUNT_TYPE_LABELS[a.accountType] },
                     { header: "Owner", cell: (a) => ownerName(people, a.ownerId) },
-                    { header: "Stocks / bonds / cash", align: "right", cell: mixLabel },
+                    {
+                      header: g.label === "Private investments" ? "Terms" : "Stocks / bonds / cash",
+                      align: "right",
+                      cell: mixLabel,
+                    },
                     { header: "Balance", align: "right", cell: (a) => formatUsd(a.balance) },
                   ]}
                 />
@@ -141,6 +156,87 @@ export default function Accounts() {
         </Sheet>
       )}
     </>
+  );
+}
+
+/** Payout terms for private funds and startups. */
+function PrivateFields({
+  account: a,
+  terms: p,
+  onChange,
+}: {
+  account: Account;
+  terms: PrivateTerms;
+  onChange: (p: PrivateTerms) => void;
+}) {
+  const set = (patch: Partial<PrivateTerms>) => onChange({ ...p, ...patch });
+  const startup = a.accountType === "startup";
+  return (
+    <div className="grid gap-4 rounded-lg border border-[var(--border)] p-4">
+      {!startup && (
+        <Row>
+          <PercentField
+            label="Cash paid out each year"
+            hint="As a share of what you invested (e.g. 8%)."
+            value={p.cashYield}
+            onChange={(cashYield) => set({ cashYield })}
+          />
+          <PercentField
+            label="Taxable share of payouts"
+            decimals={0}
+            hint={
+              a.accountType === "real_estate_fund"
+                ? "Real estate funds are often partly sheltered by depreciation; 50% is a common estimate. Check your K-1."
+                : "Private credit interest is usually fully taxable."
+            }
+            value={p.taxableShare}
+            onChange={(taxableShare) => set({ taxableShare })}
+          />
+        </Row>
+      )}
+      <Row>
+        <NumberField
+          label="Sells / pays back in (year)"
+          optional
+          placeholder="Held for the whole plan"
+          hint="Blank if it has no planned exit."
+          value={p.exitYear}
+          onChange={(exitYear) => set({ exitYear })}
+        />
+        <NumberField
+          label={startup ? "Expected payout (× invested, on average)" : "Payout at exit (× invested)"}
+          hint={
+            startup
+              ? "Across all your startups together. Each scenario draws winners and losers: most return less than invested, a few many times more."
+              : "1.5 means it sells for 1.5× what you put in. Private credit usually returns 1×."
+          }
+          value={p.exitMultiple}
+          onChange={(v) => set({ exitMultiple: v ?? p.exitMultiple })}
+          decimal
+        />
+      </Row>
+      {startup && (
+        <Row>
+          <NumberField
+            label="Number of companies"
+            hint="More companies means a smoother result."
+            value={p.companies}
+            onChange={(v) => set({ companies: Math.max(1, v ?? 1) })}
+          />
+          <div className="pt-5">
+            <Toggle
+              label="May qualify for QSBS"
+              hint="Section 1202 can make gains on qualifying startup stock held 3–5+ years tax-free (limits apply). Confirm with your CPA."
+              checked={p.qsbs}
+              onChange={(qsbs) => set({ qsbs })}
+            />
+          </div>
+        </Row>
+      )}
+      <p className="text-xs text-[var(--muted)]">
+        Counted in your net worth and estate, but never sold to pay bills before it pays out.
+      </p>
+    </div>
   );
 }
 
@@ -179,14 +275,18 @@ function AccountForm({
       <TextField label="Name" value={a.name} onChange={(v) => set("name", v)} placeholder="e.g. Schwab brokerage" />
       <Row>
         <MoneyField
-          label={a.accountType === "real_estate" ? "Current value" : "Balance"}
+          label={a.accountType === "real_estate" || isPrivate(a.accountType) ? "Current value" : "Balance"}
           value={a.balance}
           onChange={(v) => set("balance", v ?? 0)}
         />
         {tracksCostBasis(a.accountType) && (
           <MoneyField
-            label="Cost basis (optional)"
-            hint="What you paid. Used for capital-gains tax when sold."
+            label={isPrivate(a.accountType) ? "Amount invested" : "Cost basis (optional)"}
+            hint={
+              isPrivate(a.accountType)
+                ? "What you put in. Payouts and the exit multiple are based on this."
+                : "What you paid. Used for capital-gains tax when sold."
+            }
             value={a.costBasis}
             optional
             placeholder="Unknown"
@@ -194,6 +294,10 @@ function AccountForm({
           />
         )}
       </Row>
+
+      {isPrivate(a.accountType) && a.private && (
+        <PrivateFields account={a} terms={a.private} onChange={(p) => set("private", p)} />
+      )}
 
       {hasAllocation(a.accountType) && (
         <div className="grid gap-2">

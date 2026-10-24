@@ -9,6 +9,7 @@ use engine::model::{
 };
 use engine::montecarlo::{self, ScenarioDetail, Simulation};
 use engine::projection::{self, ClaimAgeOutcome, Projection};
+use engine::solver::{self, SafeGiftRequest, SafeGiftResult};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
@@ -185,6 +186,24 @@ async fn scenario_detail(
     .map_err(err)
 }
 
+/// "How much can I safely give?" for a plan (`None` = base plan).
+#[tauri::command]
+async fn safe_gift(
+    state: State<'_, AppState>,
+    start_year: i32,
+    scenario: Option<Id>,
+    request: SafeGiftRequest,
+) -> CmdResult<SafeGiftResult> {
+    let household = {
+        let conn = state.conn.lock().map_err(err)?;
+        db::load_household(&conn).map_err(err)?
+    };
+    tauri::async_runtime::spawn_blocking(move || solver::safe_gift(&household, scenario, start_year, request))
+        .await
+        .map_err(err)?
+        .map_err(err)
+}
+
 #[tauri::command]
 fn load_demo(state: State<AppState>, which: demo::Demo) -> CmdResult<Household> {
     mutate(&state, |c| db::replace_household(c, &demo::household(which)))
@@ -268,6 +287,7 @@ pub fn run() {
             compare_claim_ages,
             run_simulation,
             scenario_detail,
+            safe_gift,
             load_demo,
             clear_household,
             upsert_person,

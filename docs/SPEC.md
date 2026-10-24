@@ -109,6 +109,18 @@ v2 hook: a "tax regime" setting that multiplies or replaces brackets and exempti
   4. Gifts are grown to the estate date at the household's own yearly portfolio return before being added to what each child receives, so early gifts are compared fairly with money kept.
   5. Scenario decisions are stored as JSON on the `scenario` row (one table instead of a separate events table).
   6. The demo "Retired in Texas" became 58 with about $16.5M and three example plans.
+- **2026-10-24: Roadmap re-ordered around Mom's notes** (Jacob): scenarios are the priority.
+  - Phase 5 = wealth transfer + private investments, in three steps:
+    - 5.1: private funds and startups; gifting stock in kind; anti-clawback; tax-rise what-if; the "How much can I safely give?" solver; the Giving guide
+    - 5.2: charity with itemized deductions; 529s; tuition and medical payments
+    - 5.3: family LLC; GRATs
+  - Sharing/exports moves to Phase 6, connectivity to Phase 7. Recipients are the two kids plus charities only.
+  1. Private investments are separate account types with payout terms (yield on invested capital, taxable share, exit year and multiple, companies, QSBS), stored as JSON on the account. They're illiquid until exit.
+  2. Startup outcomes per company: 55% nothing, 15% 0.5×, 10% 1×, 10% 3×, 7% 10×, 3% 30×, scaled to the user's expected multiple. Private credit: a 3%/yr chance of a 25% loss.
+  3. Gifts carry cost basis. The kids' capital-gains tax on gift growth above basis is subtracted at an assumed 15% (editable).
+  4. Anti-clawback: the estate exemption is the larger of the exemption at death and the gifts already sheltered. Gift tax also never re-taxes sheltered gifts.
+  5. "Safe" in the solver = 95% chance the money lasts (adjustable 90/95/98). It uses common random numbers across trial amounts, searches with 1,000 scenarios, and is re-checked at the full count.
+  6. Meta's Jan 2027 Class C share dividend was researched for Mom. Conclusion: a split doesn't change a gift's value; the reason to give stock is estate math, weighed against losing the step-up in basis.
 
 ## Verification
 - `cargo test -p engine`: tax tests against IRS worked examples and hand-computed cases (brackets, LTCG stacking, SS taxability, NIIT, RMD, gift/estate exemption). Golden-file projections for the demo households. Monte Carlo sanity checks: with zero volatility the result must equal the fixed-mode output, and a fixed seed must be reproducible.

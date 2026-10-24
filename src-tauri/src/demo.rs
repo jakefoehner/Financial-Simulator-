@@ -84,6 +84,9 @@ mod tests {
             );
             out.insert(format!("run_simulation:{key}"), serde_json::to_value(sim).unwrap());
         }
+        let req = engine::solver::SafeGiftRequest { yearly: false, years: 1, target: 0.95 };
+        let gift = engine::solver::safe_gift(&h, None, 2026, req).unwrap();
+        json.as_object_mut().unwrap().insert("safe_gift".into(), serde_json::to_value(gift).unwrap());
         std::fs::write(path, serde_json::to_string(&json).unwrap()).unwrap();
     }
 
@@ -113,7 +116,7 @@ mod tests {
     fn demo_plans_are_sane() {
         use engine::projection::project;
         let mut h = household(Demo::Retiree);
-        let plans = [None, Some(1), Some(2), Some(3)];
+        let plans = [None, Some(1), Some(2), Some(3), Some(4), Some(5)];
         let run = |h: &engine::model::Household| plans.map(|p| project(h, p, 2026).unwrap().summary.estate);
         let now = run(&h);
         h.assumptions.exemption_cut_enabled = true;
@@ -128,8 +131,8 @@ mod tests {
                 e.children.iter().map(|c| c.total_real.round()).collect::<Vec<_>>()
             );
         }
-        let [base, home, yearly, loan] = &now;
-        assert!(base.estate_tax_real > 0.0, "a $16.5M estate should owe some estate tax");
+        let [base, home, yearly, loan, stock, big] = &now;
+        assert!(base.estate_tax_real > 0.0, "an estate above the exemption should owe some estate tax");
         // Yearly exclusion gifts lower the estate tax and raise what the family gets in total.
         assert!(yearly.estate_tax_real < base.estate_tax_real);
         assert!(yearly.family_total_real > base.family_total_real);
@@ -140,6 +143,34 @@ mod tests {
         for i in 0..plans.len() {
             assert!(cut[i].estate_tax_real > now[i].estate_tax_real);
         }
+        // Gifting stock: the kids inherit your basis, so they owe some capital-gains tax; less estate tax.
+        assert!(stock.heirs_capital_gains_tax_real > 0.0);
+        assert!(stock.estate_tax_real < base.estate_tax_real);
+        // A big gift now saves at least as much if the exemption is later cut. Gifts that used the
+        // exemption are added back to the estate, so what's saved is 40% of the growth after the gift;
+        // for an estate far above both exemption levels that's the same either way (anti-clawback
+        // matters most for estates near the exemption).
+        let saved_now = base.estate_tax_real - big.estate_tax_real;
+        let saved_if_cut = cut[0].estate_tax_real - cut[5].estate_tax_real;
+        println!("big gift saves {saved_now:.0} now, {saved_if_cut:.0} if the exemption is cut");
+        assert!(saved_if_cut >= saved_now - 1.0);
+        assert!(big.family_total_real > base.family_total_real);
+    }
+
+    #[test]
+    fn demo_safe_gift_is_sane() {
+        use engine::solver::{SafeGiftRequest, safe_gift};
+        let h = household(Demo::Retiree);
+        let r = safe_gift(&h, None, 2026, SafeGiftRequest { yearly: false, years: 1, target: 0.95 }).unwrap();
+        println!(
+            "safe one-time gift: {:.0} to each child ({:.0} total), odds {:.1}% (base {:.1}%)",
+            r.max_per_child,
+            r.max_total,
+            r.at_max.money_lasts * 100.0,
+            r.base_money_lasts * 100.0
+        );
+        assert!(r.achievable && r.max_per_child > 100_000.0);
+        assert!(r.at_max.money_lasts >= 0.95);
     }
 
     /// Guards against the engine drifting into nonsense on realistic households.

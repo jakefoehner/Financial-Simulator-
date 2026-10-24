@@ -2,9 +2,9 @@ import { useState } from "react";
 import { MoneyField, NumberField, PercentField, Row, SelectField, Toggle } from "../../components/fields";
 import { Sheet } from "../../components/Sheet";
 import type { TaxFacts } from "../../lib/api";
-import { afrFor, defaultLoan, eventTitle } from "../../lib/events";
+import { afrFor, afrMonthLabel, defaultLoan, eventTitle } from "../../lib/events";
 import { formatPercent, formatUsd } from "../../lib/format";
-import type { Event, Id, LoanTerms, Person } from "../../lib/types";
+import type { Account, Event, Id, LoanTerms, Person } from "../../lib/types";
 
 const CLAIM_AGES = [62, 63, 64, 65, 66, 67, 68, 69, 70];
 
@@ -13,6 +13,7 @@ export function EventSheet({
   initial,
   isNew,
   kids,
+  giftAccounts,
   facts,
   onDone,
   onRemove,
@@ -21,6 +22,7 @@ export function EventSheet({
   initial: Event;
   isNew: boolean;
   kids: Person[];
+  giftAccounts: Account[];
   facts: TaxFacts;
   onDone: (e: Event) => void;
   onRemove?: () => void;
@@ -121,6 +123,34 @@ export function EventSheet({
         </>
       )}
 
+      {e.type === "gift_assets" && (
+        <>
+          <Row>
+            <SelectField<Id>
+              label="To"
+              value={e.to ?? 0}
+              onChange={(v) => patch({ to: v === 0 ? null : v })}
+              options={[{ value: 0, label: "Each child" }, ...childOptions]}
+            />
+            <NumberField label="At your age" value={e.age} onChange={(v) => patch({ age: v ?? e.age })} />
+          </Row>
+          <Row>
+            <SelectField<Id>
+              label="From account"
+              value={e.accountId}
+              onChange={(accountId) => patch({ accountId })}
+              options={giftAccounts.map((a) => ({ value: a.id!, label: a.name }))}
+            />
+            <MoneyField
+              label={e.to == null ? "Market value to each child" : "Market value to give"}
+              value={e.amount}
+              onChange={(v) => patch({ amount: v ?? 0 })}
+            />
+          </Row>
+          <GiftBasisHint account={giftAccounts.find((a) => a.id === e.accountId)} exclusion={exclusion} />
+        </>
+      )}
+
       {e.type === "roth_conversion" && (
         <>
           <MoneyField
@@ -160,10 +190,32 @@ export function EventSheet({
   );
 }
 
+/** Explains the cost-basis trade-off for the chosen account. */
+function GiftBasisHint({ account, exclusion }: { account: Account | undefined; exclusion: string }) {
+  if (!account) return null;
+  const gainShare =
+    account.costBasis != null && account.balance > 0 ? Math.max(0, 1 - account.costBasis / account.balance) : null;
+  return (
+    <div className="grid gap-1 rounded-lg bg-accent/5 px-3 py-2 text-xs text-[var(--muted)]">
+      <p>
+        Your kids keep your original cost basis.{" "}
+        {gainShare != null
+          ? `About ${Math.round(gainShare * 100)}% of what you give from ${account.name} is gain they'd pay capital-gains tax on when they sell.`
+          : "Add the account's cost basis to see how much would be taxable gain."}{" "}
+        If you kept it instead, that gain would be wiped out at death (the step-up in basis).
+      </p>
+      <p>
+        Gifts above {exclusion} a year per child use part of your lifetime exemption. A stock split doesn't change a
+        gift's value.
+      </p>
+    </div>
+  );
+}
+
 function LoanFields({ loan, facts, onChange }: { loan: LoanTerms; facts: TaxFacts; onChange: (l: LoanTerms) => void }) {
   const set = (p: Partial<LoanTerms>) => onChange({ ...loan, ...p });
   const afr = afrFor(loan.years, facts);
-  const month = new Date(`${facts.afrMonth}-15`).toLocaleString("en-US", { month: "long", year: "numeric" });
+  const month = afrMonthLabel(facts);
   return (
     <div className="grid gap-4 rounded-lg border border-[var(--border)] p-4">
       <Row>

@@ -1,4 +1,5 @@
 import {
+  BookOpen,
   ChartLine,
   CreditCard,
   GitBranch,
@@ -13,6 +14,7 @@ import {
 import { useEffect } from "react";
 import Accounts from "./pages/Accounts";
 import Debts from "./pages/Debts";
+import Guide from "./pages/Guide";
 import Income from "./pages/Income";
 import Overview from "./pages/Overview";
 import People from "./pages/People";
@@ -34,6 +36,7 @@ const NAV: { id: Section; label: string; icon: LucideIcon }[][] = [
   [
     { id: "results", label: "Forecast", icon: ChartLine },
     { id: "scenarios", label: "Scenarios", icon: GitBranch },
+    { id: "guide", label: "Giving guide", icon: BookOpen },
   ],
   [{ id: "settings", label: "Settings", icon: SettingsIcon }],
 ];
@@ -47,6 +50,7 @@ const PAGES: Record<Section, () => React.JSX.Element | null> = {
   spending: Spending,
   results: Results,
   scenarios: Scenarios,
+  guide: Guide,
   settings: Settings,
 };
 

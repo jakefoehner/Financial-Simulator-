@@ -85,6 +85,13 @@ export default function AssumptionsCard({ assumptions }: { assumptions: Assumpti
               value={draft.heirIncomeTaxRate}
               onChange={set("heirIncomeTaxRate")}
             />
+            <PercentField
+              label="Kids' capital-gains rate on gifts"
+              decimals={0}
+              hint="Gifts keep your cost basis, so your kids pay this on the gain when they sell. Inherited assets are stepped up instead."
+              value={draft.heirCapitalGainsRate}
+              onChange={set("heirCapitalGainsRate")}
+            />
             <NumberField
               label="Estimate the estate at age"
               hint="Blank = the last year of the plan."
@@ -112,6 +119,35 @@ export default function AssumptionsCard({ assumptions }: { assumptions: Assumpti
                 label="Starting in"
                 value={draft.exemptionCutYear}
                 onChange={(v) => set("exemptionCutYear")(v ?? draft.exemptionCutYear)}
+              />
+            </div>
+          )}
+          <Toggle
+            label="What if income and capital-gains taxes rise?"
+            hint="Raises every income-tax bracket and the 15% / 20% capital-gains rates from a year you choose. Useful for weighing paying tax now (Roth conversions, gifts, selling) against later."
+            checked={draft.taxRiseEnabled}
+            onChange={set("taxRiseEnabled")}
+          />
+          {draft.taxRiseEnabled && (
+            <div className="grid grid-cols-3 gap-4">
+              <NumberField
+                label="Starting in"
+                value={draft.taxRiseYear}
+                onChange={(v) => set("taxRiseYear")(v ?? draft.taxRiseYear)}
+              />
+              <PercentField
+                label="Income-tax rates go up by"
+                decimals={1}
+                hint="Points added to every bracket (5 = 22% becomes 27%)."
+                value={draft.incomeTaxIncrease}
+                onChange={set("incomeTaxIncrease")}
+              />
+              <PercentField
+                label="Capital-gains rates go up by"
+                decimals={1}
+                hint="Points added to the 15% and 20% rates."
+                value={draft.capitalGainsIncrease}
+                onChange={set("capitalGainsIncrease")}
               />
             </div>
           )}

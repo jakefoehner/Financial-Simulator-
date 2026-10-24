@@ -90,7 +90,24 @@ Any plan can be viewed on the Forecast page, and two or three can be compared si
   - gifts are **grown to the estate date at your own portfolio's yearly return**, so giving early is compared fairly with money kept (which also grows)
   - the card shows both "given" and "worth by then"
 - **Family loans:** the rate defaults to the IRS minimum (applicable federal rate, Rev. Rul. 2026-21, Nov 2026): 4.67% for up to 3 years, 5.08% up to 9, 5.52% beyond. Payments come back to you (the interest is taxable income). Forgiven principal counts as a gift.
-- **Not modeled yet (Phase 4b):** a family LLC with valuation discounts, gifting investments directly, selling property, and state taxes other than a flat rate.
+- **Gifting stock or investments in kind** ("put stock in the kids' names"): the gift is valued at market (a stock split doesn't change that), and the kids **keep your cost basis**. What they receive subtracts the capital-gains tax they'd owe selling, at an **assumed 15%** (editable). Stock kept until death is stepped up instead, so low-basis stock is often better kept and cash or high-basis shares given.
+- **Anti-clawback** (Treasury regulations, 2019): if the exemption is cut after you've used it, gifts already sheltered stay sheltered. The estate uses the larger of the exemption at death and what your gifts locked in. For an estate far above both levels, a gift saves 40% of the growth after the gift either way; the rule matters most near the exemption.
+- **"What if taxes rise"** (Assumptions): from a chosen year, every income-tax bracket and the 15%/20% capital-gains rates rise by the points you set.
+- **"How much can you safely give?"** (Scenarios page): the largest gift, split evenly between the children (once now, or every year for N years), that keeps the chance the money lasts at or above a target (default 95%). It runs the same replayed-history scenarios at every trial amount, so a bigger gift never looks safer by luck. The answer is rounded down and re-checked with the full scenario count, and "Make this a plan" saves it.
+- **Giving guide:** every strategy in plain English, with pros, cons, what the app models, and "Try this in a plan".
+- **Not modeled yet:** charity, 529s and direct tuition/medical payments (5.2); a family LLC and GRATs (5.3); state taxes beyond a flat rate.
+
+## Private investments
+Accounts can be **Private real estate fund**, **Private credit fund**, **Startup / angel investments**, or **Other private investment**. Each has current value, amount invested, yearly cash paid out (as a share of what was invested), the taxable share of that cash, an exit year and multiple, and for startups the number of companies and a QSBS flag.
+- **Payouts:** cash comes in yearly. The taxable part counts as rental income (real estate funds) or interest (others).
+- **Value and sale:** value grows toward the exit value, moving with replayed home prices (real estate) or stocks (startups, other) in each scenario. At exit the proceeds go to savings and the gain is taxed as a long-term gain (or excluded under QSBS). Losses offset gains, plus up to $3,000 of ordinary income.
+- **Never sold early:** private investments count in net worth and the estate, but are never sold to pay bills before they pay out.
+- **Startups in the range of outcomes:**
+  - each company draws an outcome: about 55% return nothing, 15% return 0.5×, 10% return 1×, 10% return 3×, 7% return 10×, 3% return 30×
+  - the draws are scaled so the average equals the expected multiple you set
+  - more companies means a smoother result
+- **Private credit:** a 3% yearly chance of a default costing 25% of principal. The steady path assumes none.
+- These are planning assumptions (`engine/src/montecarlo.rs`, mirrored in `src/lib/simulation.ts`).
 - **Limits:** this is a planning estimate, not legal or tax advice. Confirm big gifting decisions with an estate attorney.
 
 ## Releasing (signed DMG to share)

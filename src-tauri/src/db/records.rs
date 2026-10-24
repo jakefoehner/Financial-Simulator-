@@ -114,7 +114,7 @@ pub fn delete_person(conn: &Connection, id: Id) -> Result<()> {
 // --- Account ---------------------------------------------------------------
 
 const ACCOUNT_COLS: &str = "id, name, account_type, owner_id, balance, cost_basis, stocks_pct, bonds_pct, cash_pct,
-     annual_contribution, employer_match, notes";
+     annual_contribution, employer_match, notes, private_terms";
 
 fn account_from_row(r: &Row) -> rusqlite::Result<Account> {
     Ok(Account {
@@ -130,7 +130,26 @@ fn account_from_row(r: &Row) -> rusqlite::Result<Account> {
         annual_contribution: r.get(9)?,
         employer_match: r.get(10)?,
         notes: r.get(11)?,
+        private: json_col(r, 12)?,
     })
+}
+
+/// Reads an optional JSON column (NULL → `None`).
+fn json_col<T: serde::de::DeserializeOwned>(r: &Row, idx: usize) -> rusqlite::Result<Option<T>> {
+    let text: Option<String> = r.get(idx)?;
+    text.map(|t| {
+        serde_json::from_str(&t)
+            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e)))
+    })
+    .transpose()
+}
+
+fn private_json(a: &Account) -> Result<Option<String>> {
+    // Only private types keep their terms, so switching an account's type drops stale ones.
+    match (&a.private, a.account_type.is_private()) {
+        (Some(p), true) => serde_json::to_string(p).map(Some).map_err(|e| Error::Invalid(e.to_string())),
+        _ => Ok(None),
+    }
 }
 
 pub(super) fn list_accounts(conn: &Connection) -> Result<Vec<Account>> {
@@ -139,7 +158,9 @@ pub(super) fn list_accounts(conn: &Connection) -> Result<Vec<Account>> {
 
 pub(super) fn insert_account(conn: &Connection, a: &Account) -> Result<Id> {
     conn.execute(
-        &format!("INSERT INTO account ({ACCOUNT_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"),
+        &format!(
+            "INSERT INTO account ({ACCOUNT_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"
+        ),
         params![
             a.id,
             a.name.trim(),
@@ -152,7 +173,8 @@ pub(super) fn insert_account(conn: &Connection, a: &Account) -> Result<Id> {
             a.cash_pct,
             a.annual_contribution,
             a.employer_match,
-            a.notes
+            a.notes,
+            private_json(a)?
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -166,7 +188,7 @@ pub fn upsert_account(conn: &Connection, a: &Account) -> Result<Id> {
         "account",
         "UPDATE account SET name = ?2, account_type = ?3, owner_id = ?4, balance = ?5, cost_basis = ?6,
              stocks_pct = ?7, bonds_pct = ?8, cash_pct = ?9, annual_contribution = ?10, employer_match = ?11,
-             notes = ?12
+             notes = ?12, private_terms = ?13
          WHERE id = ?1",
         params![
             id,
@@ -180,7 +202,8 @@ pub fn upsert_account(conn: &Connection, a: &Account) -> Result<Id> {
             a.cash_pct,
             a.annual_contribution,
             a.employer_match,
-            a.notes
+            a.notes,
+            private_json(a)?
         ],
     )?;
     Ok(id)
@@ -393,7 +416,7 @@ pub(super) fn insert_scenario(conn: &Connection, sc: &Scenario) -> Result<Id> {
 
 /// Saves a whole scenario (name, notes, and its decisions) in one go.
 pub fn upsert_scenario(conn: &Connection, sc: &Scenario) -> Result<Id> {
-    sc.validate(&list_people(conn)?).map_err(Error::Invalid)?;
+    sc.validate(&list_people(conn)?, &list_accounts(conn)?).map_err(Error::Invalid)?;
     let Some(id) = sc.id else { return insert_scenario(conn, sc) };
     update_one(
         conn,
@@ -441,7 +464,29 @@ mod tests {
             annual_contribution: 0.0,
             employer_match: 0.0,
             notes: String::new(),
+            private: None,
         }
+    }
+
+    #[test]
+    fn private_terms_round_trip_and_are_dropped_for_other_types() {
+        let conn = open_in_memory().unwrap();
+        let terms = engine::model::PrivateTerms::default_for(AccountType::RealEstateFund, 2026);
+        let fund = Account {
+            name: "Real estate fund".into(),
+            account_type: AccountType::RealEstateFund,
+            private: Some(terms.clone()),
+            stocks_pct: 0.0,
+            bonds_pct: 0.0,
+            ..account(None)
+        };
+        let id = upsert_account(&conn, &fund).unwrap();
+        assert_eq!(list_accounts(&conn).unwrap()[0].private, Some(terms));
+        // A private type without terms is rejected.
+        assert!(upsert_account(&conn, &Account { private: None, ..fund.clone() }).is_err());
+        // Switching to a brokerage account drops the stale terms.
+        upsert_account(&conn, &Account { id: Some(id), ..account(None) }).unwrap();
+        assert_eq!(list_accounts(&conn).unwrap()[0].private, None);
     }
 
     #[test]

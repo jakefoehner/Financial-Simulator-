@@ -1,9 +1,10 @@
 import { Info, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { formatPercent, formatUsd } from "../lib/format";
-import { DATA_SOURCES, methodSummary, scaledStockReturn, THRESHOLDS } from "../lib/simulation";
+import { DATA_SOURCES, methodSummary, PRIVATE_ASSUMPTIONS, scaledStockReturn, THRESHOLDS } from "../lib/simulation";
 import type { Assumptions } from "../lib/types";
 import { useTaxFacts } from "../lib/useTaxFacts";
+import { afrMonthLabel } from "../lib/events";
 import { Button } from "./Card";
 
 /**
@@ -105,12 +106,30 @@ function MethodPanel({ assumptions: a, onClose }: { assumptions: Assumptions; on
             inherit (it must be withdrawn within 10 years); change this in Assumptions. Other inherited assets get a
             stepped-up cost basis, so no capital-gains tax on past growth, while gifts keep your original basis. To
             compare giving early with giving later fairly, gifts are grown to the estate date at your own portfolio's
-            return, as if your kids invested them.
+            return, as if your kids invested them, and your kids are assumed to pay {pct(a.heirCapitalGainsRate, 0)}{" "}
+            capital-gains tax on that growth above their cost basis when they sell (for gifted stock, your original
+            basis). If the exemption is cut after you've used it, gifts already made stay sheltered (the IRS
+            "anti-clawback" rule).{" "}
+            {a.taxRiseEnabled
+              ? `You're testing higher taxes: from ${a.taxRiseYear}, income-tax brackets rise ${pct(a.incomeTaxIncrease, 1)} points and capital-gains rates ${pct(a.capitalGainsIncrease, 1)} points.`
+              : "You can also test higher income and capital-gains taxes from a chosen year, in Assumptions."}
             {facts
-              ? ` Family loans default to the IRS minimum rate for their length (${facts.afrMonth}: ${pct(facts.afrShortTerm)} up to 3 years, ${pct(facts.afrMidTerm)} up to 9, ${pct(facts.afrLongTerm)} beyond); forgiven principal counts as a gift.`
+              ? ` Family loans default to the IRS minimum rate for their length (${afrMonthLabel(facts)}: ${pct(facts.afrShortTerm)} up to 3 years, ${pct(facts.afrMidTerm)} up to 9, ${pct(facts.afrLongTerm)} beyond); forgiven principal counts as a gift.`
               : ""}{" "}
             Federal only (Texas has no estate tax). A planning estimate, not legal or tax advice; confirm big gifting
             decisions with an estate attorney.
+          </Section>
+          <Section title="Private investments">
+            Real estate funds, private credit, and other private investments pay their yearly cash (as a share of what
+            you invested; you set the taxable share) and grow toward their sale value, which moves with replayed home
+            prices or stocks in each scenario. They count in your net worth and estate but are never sold to pay bills
+            before they pay out. Startups are modeled company by company: in each scenario about{" "}
+            {pct(PRIVATE_ASSUMPTIONS.startupTotalLoss, 0)} of companies return nothing and{" "}
+            {pct(PRIVATE_ASSUMPTIONS.startupBelowCost, 0)} return less than invested, while about 1 in{" "}
+            {Math.round(1 / PRIVATE_ASSUMPTIONS.startupThirtyX)} returns 30×, scaled so the average matches the multiple
+            you expect. Private credit has a {pct(PRIVATE_ASSUMPTIONS.creditDefaultChance, 0)} chance each year of a
+            default costing {pct(PRIVATE_ASSUMPTIONS.creditDefaultLoss, 0)} of principal. Startup gains can be marked as
+            QSBS (tax-free, within IRS limits).
           </Section>
           <Section title="The data">
             Market returns: {DATA_SOURCES.returns}: {DATA_SOURCES.returnsSeries}, 1928–2025. Inflation:{" "}

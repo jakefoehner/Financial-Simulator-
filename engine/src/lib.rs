@@ -9,6 +9,7 @@ pub mod model;
 pub mod montecarlo;
 pub mod projection;
 pub mod social_security;
+pub mod solver;
 pub mod tax;
 pub mod tax_tables;
 

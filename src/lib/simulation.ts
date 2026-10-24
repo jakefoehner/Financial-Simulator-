@@ -37,6 +37,46 @@ export interface Simulation {
   estate: EstateRange;
 }
 
+/** Mirrors engine::solver. Money in today's dollars. */
+export interface SafeGiftRequest {
+  yearly: boolean;
+  years: number;
+  target: number;
+}
+
+export interface SafeGiftPoint {
+  perChild: number;
+  total: number;
+  moneyLasts: number;
+  familyTotalP50: number;
+  estateTaxP50: number;
+}
+
+export interface SafeGiftResult {
+  target: number;
+  yearly: boolean;
+  years: number;
+  age: number;
+  children: number;
+  baseMoneyLasts: number;
+  achievable: boolean;
+  maxPerChild: number;
+  maxTotal: number;
+  atMax: SafeGiftPoint;
+  curve: SafeGiftPoint[];
+}
+
+/** One sentence answering "how much can I safely give?". */
+export function safeGiftSentence(r: SafeGiftResult, money: (v: number) => string, endAge: number): string {
+  const pct = `${Math.round(r.target * 100)}%`;
+  if (!r.achievable) {
+    return `This plan is already below a ${pct} chance your money lasts, so there's no extra amount to give safely. Try spending a little less first, or a lower target.`;
+  }
+  const when = r.yearly ? ` every year for ${r.years} years` : " now";
+  const each = r.children === 1 ? "your child" : "each child";
+  return `You could give up to ${money(r.maxPerChild)} to ${each}${when} (${money(r.maxTotal)} in all) and keep a ${pct} chance your money lasts to ${endAge}.`;
+}
+
 /** 10th / 50th / 90th percentile of one number across scenarios. */
 export interface Spread {
   p10: number;
@@ -158,6 +198,19 @@ export const THRESHOLDS = {
 export function toneFor(share: number, bands: { good: number; caution: number }): "good" | "caution" | "bad" {
   return share >= bands.good ? "good" : share >= bands.caution ? "caution" : "bad";
 }
+
+/**
+ * Private-investment assumptions used in the range of outcomes. Mirrors
+ * STARTUP_OUTCOMES / CREDIT_DEFAULT_* in engine/src/montecarlo.rs; keep them in sync.
+ */
+export const PRIVATE_ASSUMPTIONS = {
+  /** Share of individual startups returning less than what was invested, and the share returning 30×. */
+  startupBelowCost: 0.7,
+  startupTotalLoss: 0.55,
+  startupThirtyX: 0.03,
+  creditDefaultChance: 0.03,
+  creditDefaultLoss: 0.25,
+};
 
 /** Where the bundled history comes from, shown in the app and README. */
 export const DATA_SOURCES = {

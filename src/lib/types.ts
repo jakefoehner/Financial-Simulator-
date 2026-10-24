@@ -20,7 +20,11 @@ export type AccountType =
   | "rsu"
   | "espp"
   | "options"
-  | "llc_interest";
+  | "llc_interest"
+  | "real_estate_fund"
+  | "private_credit"
+  | "startup"
+  | "other_alternative";
 export type IncomeKind = "w2" | "bonus" | "self_employment" | "rental" | "pension" | "annuity" | "other";
 export type DebtKind = "mortgage" | "student_loan" | "auto" | "credit_card" | "heloc" | "other";
 
@@ -56,6 +60,21 @@ export interface Account {
   annualContribution: number;
   employerMatch: number;
   notes: string;
+  /** Terms for private funds and startups; null for every other type. */
+  private: PrivateTerms | null;
+}
+
+/** Mirrors engine::model::PrivateTerms. `balance` is today's value; `costBasis` is what was invested. */
+export interface PrivateTerms {
+  /** Cash paid out each year, as a share of what was invested. */
+  cashYield: number;
+  /** Share of payouts that is taxable income. */
+  taxableShare: number;
+  exitYear: number | null;
+  /** Payout at exit as a multiple of what was invested (startups: the expected multiple). */
+  exitMultiple: number;
+  companies: number;
+  qsbs: boolean;
 }
 
 export interface IncomeStream {
@@ -106,6 +125,13 @@ export interface Assumptions {
   exemptionCutYear: number;
   /** Age at which to estimate the estate; null = the plan's last year. */
   estateAge: number | null;
+  /** Capital-gains rate the kids pay selling gifted assets (gifts keep your basis). */
+  heirCapitalGainsRate: number;
+  /** "What if taxes rise": from this year, brackets and capital-gains rates go up by these amounts. */
+  taxRiseEnabled: boolean;
+  taxRiseYear: number;
+  incomeTaxIncrease: number;
+  capitalGainsIncrease: number;
 }
 
 export interface LoanTerms {
@@ -121,6 +147,7 @@ export type Event =
   | { type: "home_help"; to: Id; age: number; gift: number; loan: LoanTerms | null }
   | { type: "cash_gift"; to: Id | null; amount: number; fromAge: number; years: number; maxAnnualExclusion: boolean }
   | { type: "family_loan"; to: Id; age: number; loan: LoanTerms }
+  | { type: "gift_assets"; to: Id | null; accountId: Id; age: number; amount: number }
   | { type: "social_security_age"; age: number }
   | { type: "spending_change"; fromAge: number; annualAmount: number }
   | { type: "roth_conversion"; perYear: number; fromAge: number; toAge: number };
@@ -149,6 +176,11 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
   exemptionCutAmount: 7_000_000,
   exemptionCutYear: 2030,
   estateAge: null,
+  heirCapitalGainsRate: 0.15,
+  taxRiseEnabled: false,
+  taxRiseYear: 2030,
+  incomeTaxIncrease: 0.05,
+  capitalGainsIncrease: 0.05,
 };
 
 export interface Household {
@@ -221,6 +253,15 @@ export const ACCOUNT_GROUPS: { label: string; types: { type: AccountType; label:
     ],
   },
   { label: "Property", types: [{ type: "real_estate", label: "Real estate" }] },
+  {
+    label: "Private investments",
+    types: [
+      { type: "real_estate_fund", label: "Private real estate fund" },
+      { type: "private_credit", label: "Private credit fund" },
+      { type: "startup", label: "Startup / angel investments" },
+      { type: "other_alternative", label: "Other private investment" },
+    ],
+  },
 ];
 
 export const ACCOUNT_TYPE_LABELS = Object.fromEntries(
@@ -248,14 +289,40 @@ export const DEBT_KIND_LABELS: Record<DebtKind, string> = {
 
 // --- Rules mirrored from the engine (for showing/hiding fields) --------------
 
+/** Mirrors `AccountType::is_private`. */
+export function isPrivate(t: AccountType): boolean {
+  return ["real_estate_fund", "private_credit", "startup", "other_alternative"].includes(t);
+}
+
+/** Mirrors `AccountType::giftable_in_kind`. */
+export function giftableInKind(t: AccountType): boolean {
+  return ["taxable", "crypto", "rsu", "espp"].includes(t);
+}
+
 /** Mirrors `AccountType::has_allocation`. */
 export function hasAllocation(t: AccountType): boolean {
-  return !["checking", "savings", "real_estate", "pension"].includes(t);
+  return !["checking", "savings", "real_estate", "pension"].includes(t) && !isPrivate(t);
 }
 
 /** Mirrors `AccountType::tracks_cost_basis`. */
 export function tracksCostBasis(t: AccountType): boolean {
-  return ["taxable", "real_estate", "crypto", "rsu", "espp", "options", "llc_interest"].includes(t);
+  return ["taxable", "real_estate", "crypto", "rsu", "espp", "options", "llc_interest"].includes(t) || isPrivate(t);
+}
+
+/** Mirrors `PrivateTerms::default_for`: typical starting terms the user then edits. */
+export function defaultPrivateTerms(t: AccountType, year = currentYear()): PrivateTerms {
+  const base: PrivateTerms = {
+    cashYield: 0,
+    taxableShare: 1,
+    exitYear: year + 7,
+    exitMultiple: 1.5,
+    companies: 1,
+    qsbs: false,
+  };
+  if (t === "real_estate_fund") return { ...base, cashYield: 0.08, taxableShare: 0.5 };
+  if (t === "private_credit") return { ...base, cashYield: 0.085, exitYear: year + 5, exitMultiple: 1 };
+  if (t === "startup") return { ...base, exitYear: year + 8, exitMultiple: 2, companies: 5 };
+  return base;
 }
 
 /** Accounts you typically add money to every year. */

@@ -11,7 +11,16 @@ import {
 } from "./projection";
 
 function year(overrides: Partial<YearResult>): YearResult {
-  const zero = { cash: 0, taxable: 0, taxDeferred: 0, taxFree: 0, realEstate: 0, education: 0, loansReceivable: 0 };
+  const zero = {
+    cash: 0,
+    taxable: 0,
+    taxDeferred: 0,
+    taxFree: 0,
+    realEstate: 0,
+    education: 0,
+    loansReceivable: 0,
+    private: 0,
+  };
   return {
     year: 2026,
     age: 67,
@@ -43,6 +52,9 @@ function year(overrides: Partial<YearResult>): YearResult {
     rothConversion: 0,
     lifetimeTaxableGifts: 0,
     portfolioReturn: 0,
+    privateIncome: 0,
+    privateProceeds: 0,
+    shelteredGifts: 0,
     ...overrides,
   };
 }
@@ -103,7 +115,16 @@ describe("inDollars", () => {
 describe("rows", () => {
   it("folds 529s into the real-estate band and keeps net worth", () => {
     const y = year({
-      balances: { cash: 1, taxable: 2, taxDeferred: 3, taxFree: 4, realEstate: 5, education: 6, loansReceivable: 0 },
+      balances: {
+        cash: 1,
+        taxable: 2,
+        taxDeferred: 3,
+        taxFree: 4,
+        realEstate: 5,
+        education: 6,
+        loansReceivable: 0,
+        private: 0,
+      },
       netWorth: 21,
       priceLevel: 1,
     });

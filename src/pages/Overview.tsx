@@ -11,7 +11,7 @@ const DEMOS: { id: DemoName; title: string; body: string }[] = [
   {
     id: "retiree",
     title: "Retired in Texas",
-    body: "Single, 58, about $16.5M across brokerage, IRAs, a home, and a rental. Two adult children and three example gifting plans.",
+    body: "Single, 58, about $18M across brokerage, IRAs, real estate, private funds, and startups. Two adult children and five example gifting plans.",
   },
   {
     id: "early_career",
@@ -57,7 +57,7 @@ export default function Overview() {
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Stat label="Net worth" value={s.netWorth} emphasis />
             <Stat label="Savings & investments" value={s.investable} />
-            <Stat label="Real estate" value={s.realEstate} />
+            <Stat label="Real estate & private" value={s.realEstate + s.privateInvestments} />
             <Stat label="Debts" value={s.totalDebts} />
           </div>
         )}

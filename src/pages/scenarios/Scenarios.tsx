@@ -8,6 +8,7 @@ import { formatPercent, formatUsdCompact } from "../../lib/format";
 import { useApp } from "../../lib/store";
 import { currentYear, type Id, type Scenario } from "../../lib/types";
 import Compare, { planName } from "./Compare";
+import SafeGiftCard from "./SafeGiftCard";
 import ScenarioEditor from "./ScenarioEditor";
 
 const MAX_COMPARE = 3;
@@ -21,6 +22,7 @@ export default function Scenarios() {
   const [error, setError] = useState<string | null>(null);
 
   const nameOf = (id: number) => household.people.find((p) => p.id === id)?.name ?? "someone removed";
+  const accountName = (id: number) => household.accounts.find((a) => a.id === id)?.name ?? "an account";
 
   if (editing) {
     return (
@@ -64,6 +66,8 @@ export default function Scenarios() {
       {error && <p className="mb-4 text-sm text-[var(--critical)]">{error}</p>}
 
       <div className="grid gap-5">
+        <SafeGiftCard household={household} />
+
         <div className="grid gap-3 lg:grid-cols-2">
           <PlanCard
             title="Base plan"
@@ -81,7 +85,7 @@ export default function Scenarios() {
               subtitle={sc.notes}
               lines={[...sc.events]
                 .sort((a, b) => eventAge(a) - eventAge(b))
-                .map((e) => eventSummary(e, nameOf, formatUsdCompact, formatPercent))}
+                .map((e) => eventSummary(e, nameOf, formatUsdCompact, formatPercent, accountName))}
               comparing={compare.includes(sc.id)}
               onCompare={() => toggleCompare(sc.id)}
               onView={() => view(sc.id)}

@@ -12,7 +12,12 @@
 //! - Each child receives their own lifetime gifts plus an equal share of what's left.
 //!   For a fair comparison with money kept (which grows until the estate date),
 //!   gifts are also shown grown to the estate date at the same yearly return your
-//!   own savings earned, as if the child invested them the same way.
+//!   own savings earned, as if the child invested them the same way. The kids then
+//!   owe capital-gains tax (an assumed rate, default 15%) on that growth above their
+//!   cost basis: the gift amount for cash, your original basis for gifted investments.
+//! - Anti-clawback (IRS regulations, 2019): if the exemption is cut after you've used it,
+//!   gifts already sheltered stay sheltered. The estate uses the larger of the exemption
+//!   at death and the amount your lifetime gifts locked in.
 
 use std::ops::Add;
 
@@ -32,8 +37,10 @@ pub struct ChildEstate {
     pub gifts_real: f64,
     /// The same gifts grown to the estate date at your portfolio's return.
     pub gifts_grown_real: f64,
+    /// Capital-gains tax the child would owe selling those gifts (gifts keep their basis).
+    pub gifts_capital_gains_tax_real: f64,
     pub inheritance_real: f64,
-    /// `gifts_grown_real + inheritance_real`.
+    /// `gifts_grown_real - gifts_capital_gains_tax_real + inheritance_real`.
     pub total_real: f64,
 }
 
@@ -55,6 +62,10 @@ pub struct EstateResult {
     pub net_inheritance_real: f64,
     pub lifetime_gifts_real: f64,
     pub lifetime_gifts_grown_real: f64,
+    pub heir_capital_gains_rate: f64,
+    pub heirs_capital_gains_tax_real: f64,
+    /// True when gifts made under a higher exemption are protecting the estate (anti-clawback).
+    pub anti_clawback_applies: bool,
     /// Everything the children receive: gifts (grown to the estate date) plus the inheritance after taxes.
     pub family_total_real: f64,
     pub children: Vec<ChildEstate>,
@@ -70,7 +81,8 @@ pub fn estate_at(h: &Household, years: &[YearResult], start_year: i32, t: &TaxTa
 
     let price = y.price_level;
     let index = price * (1.0 + a.inflation).powi(start_year - t.year);
-    let exemption = t.estate_exemption(y.year, index, a);
+    let exemption_at_death = t.estate_exemption(y.year, index, a);
+    let exemption = exemption_at_death.max(y.sheltered_gifts);
     let gift_tax_paid = years[..=i].iter().map(|y| y.gift_tax).fold(0.0, f64::add);
     let gross = y.net_worth.max(0.0);
     let taxable = gross + y.lifetime_taxable_gifts - exemption;
@@ -78,25 +90,29 @@ pub fn estate_at(h: &Household, years: &[YearResult], start_year: i32, t: &TaxTa
     let heirs_income_tax = y.balances.tax_deferred.max(0.0) * a.heir_income_tax_rate;
     let net = (gross - estate_tax - heirs_income_tax).max(0.0);
 
-    // Per child: (gifts in today's dollars when given, gifts grown to the estate date in today's dollars).
-    // Gifts happen at the start of a year, so they grow through that year and every later one.
-    let mut gifts_by_child: Vec<(Id, f64, f64)> = Vec::new();
+    // Per child: (gifts in today's dollars when given, grown to the estate date, kids' capital-gains tax),
+    // all in today's dollars. Gifts happen at the start of a year, so they grow through that year and later ones.
+    let mut gifts_by_child: Vec<(Id, f64, f64, f64)> = Vec::new();
     for (k, yr) in years[..=i].iter().enumerate() {
         let level = if k == 0 { 1.0 } else { years[k - 1].price_level };
         let growth: f64 = years[k..=i].iter().map(|y| 1.0 + y.portfolio_return).product();
         for g in &yr.gifts_by_child {
-            let (face, grown) = (g.amount / level, g.amount * growth / price);
-            match gifts_by_child.iter_mut().find(|(id, _, _)| *id == g.child_id) {
-                Some((_, f, gr)) => {
-                    *f += face;
-                    *gr += grown;
+            let grown_nominal = g.amount * growth;
+            let tax_nominal = a.heir_capital_gains_rate * (grown_nominal - g.basis).max(0.0);
+            let (face, grown, tax) = (g.amount / level, grown_nominal / price, tax_nominal / price);
+            match gifts_by_child.iter_mut().find(|e| e.0 == g.child_id) {
+                Some(e) => {
+                    e.1 += face;
+                    e.2 += grown;
+                    e.3 += tax;
                 }
-                None => gifts_by_child.push((g.child_id, face, grown)),
+                None => gifts_by_child.push((g.child_id, face, grown, tax)),
             }
         }
     }
     let lifetime_gifts_real = gifts_by_child.iter().map(|g| g.1).fold(0.0, f64::add);
     let lifetime_gifts_grown_real = gifts_by_child.iter().map(|g| g.2).fold(0.0, f64::add);
+    let heirs_capital_gains_tax_real = gifts_by_child.iter().map(|g| g.3).fold(0.0, f64::add);
     let exemption_used_real = years[..=i]
         .iter()
         .enumerate()
@@ -115,22 +131,24 @@ pub fn estate_at(h: &Household, years: &[YearResult], start_year: i32, t: &TaxTa
             name: "Heirs".into(),
             gifts_real: lifetime_gifts_real,
             gifts_grown_real: lifetime_gifts_grown_real,
+            gifts_capital_gains_tax_real: heirs_capital_gains_tax_real,
             inheritance_real: net_real,
-            total_real: lifetime_gifts_grown_real + net_real,
+            total_real: lifetime_gifts_grown_real - heirs_capital_gains_tax_real + net_real,
         }]
     } else {
         let share = net_real / kids.len() as f64;
         kids.iter()
             .map(|k| {
-                let (face, grown) =
-                    gifts_by_child.iter().find(|g| Some(g.0) == k.id).map_or((0.0, 0.0), |g| (g.1, g.2));
+                let (face, grown, tax) =
+                    gifts_by_child.iter().find(|g| Some(g.0) == k.id).map_or((0.0, 0.0, 0.0), |g| (g.1, g.2, g.3));
                 ChildEstate {
                     child_id: k.id,
                     name: k.name.clone(),
                     gifts_real: face,
                     gifts_grown_real: grown,
+                    gifts_capital_gains_tax_real: tax,
                     inheritance_real: share,
-                    total_real: grown + share,
+                    total_real: grown - tax + share,
                 }
             })
             .collect()
@@ -150,7 +168,10 @@ pub fn estate_at(h: &Household, years: &[YearResult], start_year: i32, t: &TaxTa
         net_inheritance_real: net_real,
         lifetime_gifts_real,
         lifetime_gifts_grown_real,
-        family_total_real: net_real + lifetime_gifts_grown_real,
+        heir_capital_gains_rate: a.heir_capital_gains_rate,
+        heirs_capital_gains_tax_real,
+        anti_clawback_applies: y.sheltered_gifts > exemption_at_death,
+        family_total_real: net_real + lifetime_gifts_grown_real - heirs_capital_gains_tax_real,
         children,
     }
 }
@@ -248,7 +269,7 @@ mod tests {
     fn gifts_count_toward_each_childs_total() {
         let h = household(2, Assumptions::default());
         let mut y0 = year(2026, 5_000_000.0, 0.0, 81_000.0);
-        y0.gifts_by_child = vec![ChildAmount { child_id: 10, amount: 100_000.0 }];
+        y0.gifts_by_child = vec![ChildAmount { child_id: 10, amount: 100_000.0, basis: 100_000.0 }];
         let e = estate_at(&h, &[y0], 2026, TaxTables::current());
         let (a, b) = (&e.children[0], &e.children[1]);
         close(a.gifts_real, 100_000.0);
@@ -261,15 +282,42 @@ mod tests {
     fn gifts_grow_to_the_estate_date_at_the_portfolio_return() {
         let h = household(1, Assumptions::default());
         let mut y0 = year(2026, 0.0, 0.0, 0.0);
-        y0.gifts_by_child = vec![ChildAmount { child_id: 10, amount: 100_000.0 }];
+        y0.gifts_by_child = vec![ChildAmount { child_id: 10, amount: 100_000.0, basis: 100_000.0 }];
         y0.portfolio_return = 0.10;
         let mut y1 = year(2027, 1_000_000.0, 0.0, 0.0);
         y1.portfolio_return = 0.10;
         let e = estate_at(&h, &[y0, y1], 2026, TaxTables::current());
-        // Given at the start of 2026, grown through 2026 and 2027: 100k × 1.1².
+        // Given at the start of 2026, grown through 2026 and 2027: 100k × 1.1² = 121k.
+        // The kids owe 15% on the 21k of growth when they sell (3,150).
         close(e.children[0].gifts_real, 100_000.0);
         close(e.children[0].gifts_grown_real, 121_000.0);
-        close(e.family_total_real, 1_121_000.0);
+        close(e.children[0].gifts_capital_gains_tax_real, 3_150.0);
+        close(e.family_total_real, 1_117_850.0);
+    }
+
+    #[test]
+    fn gifted_stock_carries_its_low_basis() {
+        // $100k of stock with a $20k basis, sold right away: 15% × 80k = 12k of tax for the kids.
+        let h = household(1, Assumptions::default());
+        let mut y0 = year(2026, 0.0, 0.0, 0.0);
+        y0.gifts_by_child = vec![ChildAmount { child_id: 10, amount: 100_000.0, basis: 20_000.0 }];
+        let e = estate_at(&h, &[y0], 2026, TaxTables::current());
+        close(e.children[0].gifts_capital_gains_tax_real, 12_000.0);
+        close(e.children[0].total_real, 88_000.0);
+    }
+
+    #[test]
+    fn anti_clawback_protects_gifts_made_before_a_cut() {
+        // $10M of gifts sheltered under the $15M exemption; exemption later cut to $7M.
+        // Estate $10M + $10M gifts = $20M taxable. Without anti-clawback: (20 − 7) × 40% = 5.2M.
+        // With it, the exemption is max(7M, 10M sheltered) = 10M: (20 − 10) × 40% = 4M.
+        let a = Assumptions { exemption_cut_enabled: true, ..Default::default() };
+        let h = household(2, a);
+        let mut y = year(2031, 10_000_000.0, 0.0, 10_000_000.0);
+        y.sheltered_gifts = 10_000_000.0;
+        let e = estate_at(&h, &[y], 2026, TaxTables::current());
+        assert!(e.anti_clawback_applies);
+        close(e.estate_tax_real, 4_000_000.0);
     }
 
     #[test]

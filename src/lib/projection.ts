@@ -9,6 +9,8 @@ export interface Balances {
   education: number;
   /** Family loans still owed to you. */
   loansReceivable: number;
+  /** Private funds and startups (not spendable until they pay out). */
+  private: number;
 }
 
 export interface TaxResult {
@@ -49,7 +51,7 @@ export interface YearResult {
   shortfall: number;
   /** Gifts this year including forgiven loan principal; `cashGifts` is just the cash given. */
   gifts: number;
-  giftsByChild: { childId: number; amount: number }[];
+  giftsByChild: { childId: number; amount: number; basis: number }[];
   giftTax: number;
   cashGifts: number;
   loansMade: number;
@@ -57,6 +59,9 @@ export interface YearResult {
   rothConversion: number;
   lifetimeTaxableGifts: number;
   portfolioReturn: number;
+  privateIncome: number;
+  privateProceeds: number;
+  shelteredGifts: number;
   tax: TaxResult;
   balances: Balances;
   debtBalance: number;
@@ -69,6 +74,7 @@ export interface ChildEstate {
   name: string;
   giftsReal: number;
   giftsGrownReal: number;
+  giftsCapitalGainsTaxReal: number;
   inheritanceReal: number;
   totalReal: number;
 }
@@ -88,6 +94,9 @@ export interface EstateResult {
   netInheritanceReal: number;
   lifetimeGiftsReal: number;
   lifetimeGiftsGrownReal: number;
+  heirCapitalGainsRate: number;
+  heirsCapitalGainsTaxReal: number;
+  antiClawbackApplies: boolean;
   familyTotalReal: number;
   children: ChildEstate[];
 }
@@ -164,7 +173,7 @@ export const BALANCE_SERIES = [
   {
     key: "realEstate",
     label: "Real estate & other",
-    hint: "Homes, property, any 529s, and family loans owed to you",
+    hint: "Homes, property, private funds and startups, any 529s, and family loans owed to you",
   },
 ] as const;
 
@@ -194,7 +203,7 @@ export function balanceRows(p: Projection, mode: DollarMode): BalanceRow[] {
       taxFree: d(y.balances.taxFree),
       // 529s are rare and small; fold them into the top band instead of adding a 6th color.
       // 529s and family loans are rare and small; fold them into the top band instead of adding colors.
-      realEstate: d(y.balances.realEstate + y.balances.education + y.balances.loansReceivable),
+      realEstate: d(y.balances.realEstate + y.balances.education + y.balances.loansReceivable + y.balances.private),
       debt: d(y.debtBalance),
       netWorth: d(y.netWorth),
     };
@@ -224,7 +233,7 @@ export function cashFlowRows(p: Projection, mode: DollarMode): CashFlowRow[] {
       year: y.year,
       age: y.age,
       // Family loan repayments count as money coming in.
-      income: f(y.earnedIncome + y.otherIncome + y.loanReceipts),
+      income: f(y.earnedIncome + y.otherIncome + y.loanReceipts + y.privateIncome),
       socialSecurity: f(y.socialSecurity),
       // RMDs are forced withdrawals, so they count as money from savings.
       fromSavings: f(y.withdrawals + y.requiredDistributions),

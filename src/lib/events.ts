@@ -15,6 +15,11 @@ export const EVENT_CHOICES: { type: EventType; title: string; blurb: string }[] 
     title: "Lend money to a child",
     blurb: "A loan at the IRS minimum rate, optionally forgiving some each year",
   },
+  {
+    type: "gift_assets",
+    title: "Give stock or investments",
+    blurb: "Put shares in a child's name; they keep your cost basis",
+  },
   { type: "roth_conversion", title: "Convert to Roth", blurb: "Move traditional IRA money to a Roth, paying tax now" },
   { type: "spending_change", title: "Change yearly spending", blurb: "Spend more or less from a certain age" },
   { type: "social_security_age", title: "Start Social Security at…", blurb: "Try a different claiming age" },
@@ -22,6 +27,11 @@ export const EVENT_CHOICES: { type: EventType; title: string; blurb: string }[] 
 
 export function eventTitle(type: EventType): string {
   return EVENT_CHOICES.find((c) => c.type === type)!.title;
+}
+
+/** "2026-11" → "November 2026". */
+export function afrMonthLabel(facts: TaxFacts): string {
+  return new Date(`${facts.afrMonth}-15T12:00:00`).toLocaleString("en-US", { month: "long", year: "numeric" });
 }
 
 /** The IRS minimum (AFR) for a loan of this length: up to 3 years short-term, up to 9 mid-term, else long-term. */
@@ -34,7 +44,10 @@ export function defaultLoan(facts: TaxFacts, amount = 300_000, years = 15): Loan
 }
 
 /** A sensible starting point for a new decision. `age` is the primary person's age next year. */
-export function newEvent(type: EventType, ctx: { firstChild: Id | null; age: number; facts: TaxFacts }): Event {
+export function newEvent(
+  type: EventType,
+  ctx: { firstChild: Id | null; firstGiftAccount: Id | null; age: number; facts: TaxFacts },
+): Event {
   const to = ctx.firstChild ?? 0;
   switch (type) {
     case "home_help":
@@ -50,6 +63,8 @@ export function newEvent(type: EventType, ctx: { firstChild: Id | null; age: num
       };
     case "family_loan":
       return { type, to, age: ctx.age, loan: defaultLoan(ctx.facts) };
+    case "gift_assets":
+      return { type, to: null, accountId: ctx.firstGiftAccount ?? 0, age: ctx.age, amount: 500_000 };
     case "roth_conversion":
       return { type, perYear: 100_000, fromAge: ctx.age, toAge: ctx.age + 4 };
     case "spending_change":
@@ -64,6 +79,7 @@ export function eventAge(e: Event): number {
   switch (e.type) {
     case "home_help":
     case "family_loan":
+    case "gift_assets":
     case "social_security_age":
       return e.age;
     case "cash_gift":
@@ -83,6 +99,7 @@ export function eventSummary(
   nameOf: (id: Id) => string,
   money: (v: number) => string,
   pct: (v: number) => string,
+  accountName: (id: Id) => string = () => "an investment account",
 ): string {
   const loanText = (l: LoanTerms) =>
     `${money(l.amount)} loan over ${l.years} yrs at ${pct(l.rate)}${l.interestOnly ? " (interest only)" : ""}` +
@@ -102,6 +119,8 @@ export function eventSummary(
     }
     case "family_loan":
       return `Age ${e.age} · Lend ${nameOf(e.to)} ${loanText(e.loan)}`;
+    case "gift_assets":
+      return `Age ${e.age} · Give ${e.to == null ? "each child" : nameOf(e.to)} ${money(e.amount)} from ${accountName(e.accountId)}`;
     case "roth_conversion":
       return `${ages(e.fromAge, e.toAge - e.fromAge + 1)} · Convert ${money(e.perYear)} a year to Roth`;
     case "spending_change":

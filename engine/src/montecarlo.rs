@@ -5,17 +5,64 @@
 //! Each scenario has its own seed derived from its index, so results are
 //! identical run to run and regardless of how many threads run them.
 
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use serde::Serialize;
 
 use crate::history::{self, CenteredYear, HistoricalYear};
-use crate::model::{Event, Household, Id};
-use crate::projection::{self, MarketYear, Projection, ProjectionError};
+use crate::model::{AccountType, Event, Household, Id};
+use crate::projection::{self, MarketYear, PrivateOutcomes, Projection, ProjectionError};
 use crate::tax_tables::TaxTables;
 
 const BASE_SEED: u64 = 0x5EED_2026_1023;
+
+/// What one startup returns, as a multiple of what was invested, and how often.
+/// A planning assumption in the spirit of venture-capital data: most companies return
+/// less than they raised and a few return many times. Results are scaled so the
+/// average equals the multiple the user expects.
+pub const STARTUP_OUTCOMES: [(f64, f64); 6] =
+    [(0.0, 0.55), (0.5, 0.15), (1.0, 0.10), (3.0, 0.10), (10.0, 0.07), (30.0, 0.03)];
+/// Private credit: chance of a default in any year, and the share of principal it costs.
+pub const CREDIT_DEFAULT_CHANCE: f64 = 0.03;
+pub const CREDIT_DEFAULT_LOSS: f64 = 0.25;
+
+fn startup_mean() -> f64 {
+    STARTUP_OUTCOMES.iter().map(|(m, p)| m * p).sum()
+}
+
+/// One scenario's private-investment luck: each startup account's payout (relative to
+/// its expected multiple, averaged over its companies) and each year's credit defaults.
+fn draw_private_outcomes(rng: &mut impl Rng, h: &Household, horizon: usize) -> PrivateOutcomes {
+    let mean = startup_mean();
+    let startup_multiplier = h
+        .accounts
+        .iter()
+        .map(|a| match (&a.private, a.account_type) {
+            (Some(terms), AccountType::Startup) => {
+                let n = terms.companies.max(1);
+                let total: f64 = (0..n)
+                    .map(|_| {
+                        let mut u: f64 = rng.random();
+                        STARTUP_OUTCOMES
+                            .iter()
+                            .find(|(_, p)| {
+                                u -= p;
+                                u < 0.0
+                            })
+                            .map_or(STARTUP_OUTCOMES[5].0, |(m, _)| *m)
+                    })
+                    .sum();
+                total / n as f64 / mean
+            }
+            _ => 1.0,
+        })
+        .collect();
+    let credit_loss = (0..horizon)
+        .map(|_| if rng.random::<f64>() < CREDIT_DEFAULT_CHANCE { CREDIT_DEFAULT_LOSS } else { 0.0 })
+        .collect();
+    PrivateOutcomes { startup_multiplier, credit_loss }
+}
 
 fn path_rng(index: usize) -> ChaCha8Rng {
     ChaCha8Rng::seed_from_u64(BASE_SEED ^ (index as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15))
@@ -146,8 +193,10 @@ fn run_path(
     horizon: usize,
     index: usize,
 ) -> Result<(Projection, Vec<usize>), ProjectionError> {
-    let picks = history::sample_path(&mut path_rng(index), table.len(), horizon);
-    let proj = projection::project_market(h, events, start_year, t, scenario_market(table, &picks))?;
+    let mut rng = path_rng(index);
+    let picks = history::sample_path(&mut rng, table.len(), horizon);
+    let outcomes = draw_private_outcomes(&mut rng, h, horizon);
+    let proj = projection::project_market(h, events, start_year, t, &outcomes, scenario_market(table, &picks))?;
     Ok((proj, picks))
 }
 
@@ -187,7 +236,9 @@ pub fn simulate_with(
         .collect::<Result<_, ProjectionError>>()?;
 
     // Ages/years and the starting point are the same in every scenario; take them from the steady path.
-    let steady = projection::project_market(h, events, start_year, t, |_| MarketYear::steady(&h.assumptions))?;
+    let steady = projection::project_market(h, events, start_year, t, &PrivateOutcomes::default(), |_| {
+        MarketYear::steady(&h.assumptions)
+    })?;
     let starting = steady.summary.starting_investable;
     let n = scenarios.max(1) as f64;
 
@@ -355,6 +406,7 @@ mod tests {
                 annual_contribution: 0.0,
                 employer_match: 0.0,
                 notes: String::new(),
+                private: None,
             }],
             ..Default::default()
         }
@@ -363,6 +415,28 @@ mod tests {
     fn run(h: &Household, n: usize) -> Simulation {
         let table = history::centered(&h.assumptions);
         simulate_with(h, &[], 2026, TaxTables::current(), &table, n).unwrap()
+    }
+
+    #[test]
+    fn startup_outcomes_are_mostly_losses_with_a_few_big_wins() {
+        let total: f64 = STARTUP_OUTCOMES.iter().map(|(_, p)| p).sum();
+        assert!((total - 1.0).abs() < 1e-12);
+        let below_cost: f64 = STARTUP_OUTCOMES.iter().filter(|(m, _)| *m < 1.0).map(|(_, p)| p).sum();
+        assert!((below_cost - 0.70).abs() < 1e-12);
+        // Draws average to 1.0 (relative to the expected multiple) over many companies.
+        let mut h = retiree(0.0);
+        h.accounts[0].account_type = AccountType::Startup;
+        h.accounts[0].private = Some(crate::model::PrivateTerms {
+            companies: 20_000,
+            ..crate::model::PrivateTerms::default_for(AccountType::Startup, 2026)
+        });
+        let o = draw_private_outcomes(&mut path_rng(1), &h, 10);
+        assert!((o.startup_multiplier[0] - 1.0).abs() < 0.05, "{}", o.startup_multiplier[0]);
+        let one = crate::model::PrivateTerms { companies: 1, ..h.accounts[0].private.clone().unwrap() };
+        h.accounts[0].private = Some(one);
+        let zeros =
+            (0..1000).filter(|&i| draw_private_outcomes(&mut path_rng(i), &h, 1).startup_multiplier[0] == 0.0).count();
+        assert!((450..650).contains(&zeros), "a single startup is a total loss about 55% of the time ({zeros})");
     }
 
     #[test]
