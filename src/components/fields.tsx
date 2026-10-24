@@ -37,6 +37,7 @@ export function TextField({
   onChange,
   placeholder,
   autoFocus,
+  type = "text",
 }: {
   label: string;
   hint?: ReactNode;
@@ -44,12 +45,14 @@ export function TextField({
   onChange: (v: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
+  type?: "text" | "password";
 }) {
   return (
     <Field label={label} hint={hint}>
       {(id) => (
         <input
           id={id}
+          type={type}
           className={inputClass}
           value={value}
           placeholder={placeholder}

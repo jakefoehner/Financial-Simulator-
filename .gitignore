@@ -18,6 +18,8 @@ dist-ssr
 *.sqlite-wal
 *.sqlite-shm
 *.fsim
+# Golden backup files (demo data only) used by the compatibility tests.
+!fixtures/backups/*.fsim
 
 # Never commit signing material
 *.p12

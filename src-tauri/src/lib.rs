@@ -1,8 +1,10 @@
+mod backup;
 mod db;
 mod demo;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use engine::model::{
     Account, Assumptions, Debt, Household, HouseholdInfo, Id, IncomeStream, OneTimeExpense, Person, Scenario,
@@ -15,17 +17,82 @@ use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use tauri::{Manager, State};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::{Emitter, Manager, RunEvent, State};
 
 struct AppState {
     conn: Mutex<Connection>,
     db_path: PathBuf,
+    /// Safety copies go here when automatic backups are off.
+    app_data_dir: PathBuf,
+    auto: Mutex<AutoBackup>,
     /// Recent range-of-outcomes results, keyed by a hash of (household, plan, start year),
     /// so switching between plans or comparing them doesn't re-run.
     simulation_cache: Mutex<Vec<(u64, Arc<Simulation>)>>,
 }
 
 const SIMULATION_CACHE_SIZE: usize = 8;
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Automatic backups are written at most this often while editing (and always at quit).
+const AUTO_BACKUP_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+#[derive(Default)]
+struct AutoBackup {
+    last_written: Option<Instant>,
+    /// Changed since the last automatic backup.
+    dirty: bool,
+    last_error: Option<String>,
+}
+
+/// (RFC 3339 time for the file, sortable stamp for its name), in local time.
+fn now_stamps() -> (String, String) {
+    let now = chrono::Local::now();
+    (now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false), now.format("%Y-%m-%d %H-%M-%S").to_string())
+}
+
+/// Writes a dated, unencrypted backup of the stored household into `folder` (keeping the newest 10).
+fn write_dated_backup(conn: &Connection, folder: &Path) -> Result<PathBuf, String> {
+    let h = db::load_household(conn).map_err(err)?;
+    let (at, stamp) = now_stamps();
+    let path = backup::write_auto(folder, &backup::encode(&h, None, APP_VERSION, &at), &stamp)
+        .map_err(|e| format!("Couldn't write an automatic backup to {}: {e}", folder.display()))?;
+    db::record_auto_backup(conn, &at).map_err(err)?;
+    Ok(path)
+}
+
+/// Writes an automatic backup if they're turned on and one is due (`force`: write now if anything changed).
+fn auto_backup(state: &AppState, conn: &Connection, force: bool) {
+    let Ok(settings) = db::get_backup_settings(conn) else { return };
+    let (true, Some(folder)) = (settings.auto_backup, settings.backup_folder) else { return };
+    let Ok(mut auto) = state.auto.lock() else { return };
+    let due = auto.dirty && (force || auto.last_written.is_none_or(|t| t.elapsed() >= AUTO_BACKUP_INTERVAL));
+    if !due {
+        return;
+    }
+    match write_dated_backup(conn, Path::new(&folder)) {
+        Ok(_) => {
+            auto.last_written = Some(Instant::now());
+            auto.dirty = false;
+            auto.last_error = None;
+        }
+        Err(e) => auto.last_error = Some(e),
+    }
+}
+
+/// Before replacing everything (restore, demo, clear): save what's there now, to the backup
+/// folder if automatic backups are on, else to "Safety copies" in the app's data folder.
+fn safety_copy(state: &AppState, conn: &Connection) -> Result<(), String> {
+    let h = db::load_household(conn).map_err(err)?;
+    if h.people.is_empty() && h.accounts.is_empty() {
+        return Ok(());
+    }
+    let settings = db::get_backup_settings(conn).map_err(err)?;
+    let folder = match (settings.auto_backup, settings.backup_folder) {
+        (true, Some(f)) => PathBuf::from(f),
+        _ => state.app_data_dir.join("Safety copies"),
+    };
+    write_dated_backup(conn, &folder).map(drop)
+}
 
 fn cache_key(h: &Household, scenario: Option<Id>, start_year: i32) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -47,7 +114,113 @@ fn err<E: std::fmt::Display>(e: E) -> String {
 fn mutate(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> db::Result<()>) -> CmdResult<Household> {
     let mut conn = state.conn.lock().map_err(err)?;
     f(&mut conn).map_err(err)?;
+    if let Ok(mut auto) = state.auto.lock() {
+        auto.dirty = true;
+    }
+    auto_backup(state, &conn, false);
     db::load_household(&conn).map_err(err)
+}
+
+/// Like `mutate`, for changes that replace all data: keeps a safety copy first.
+fn replace_all(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> db::Result<()>) -> CmdResult<Household> {
+    {
+        let conn = state.conn.lock().map_err(err)?;
+        safety_copy(state, &conn)
+            .map_err(|e| format!("Nothing was changed: couldn't save a safety copy first. {e}"))?;
+    }
+    mutate(state, f)
+}
+
+/// Adds ".fsim" when the name has no extension.
+fn with_extension(path: &str) -> PathBuf {
+    let p = PathBuf::from(path);
+    if p.extension().is_some() { p } else { p.with_extension(backup::EXTENSION) }
+}
+
+#[tauri::command]
+fn save_backup(state: State<AppState>, path: String, password: Option<String>) -> CmdResult<()> {
+    let conn = state.conn.lock().map_err(err)?;
+    let h = db::load_household(&conn).map_err(err)?;
+    let (at, _) = now_stamps();
+    let bytes = backup::encode(&h, password.as_deref(), APP_VERSION, &at);
+    backup::write_atomic(&with_extension(&path), &bytes).map_err(|e| format!("Couldn't save the backup: {e}"))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupPreview {
+    needs_password: bool,
+    info: Option<backup::BackupInfo>,
+}
+
+fn read_backup_file(path: &str) -> CmdResult<Vec<u8>> {
+    std::fs::read(path).map_err(|e| format!("Couldn't open that file: {e}"))
+}
+
+/// What's in a backup, before restoring it. Asks for a password if it has one.
+#[tauri::command]
+fn inspect_backup(path: String, password: Option<String>) -> CmdResult<BackupPreview> {
+    let bytes = read_backup_file(&path)?;
+    match backup::decode(&bytes, password.as_deref()) {
+        Ok((_, info)) => Ok(BackupPreview { needs_password: false, info: Some(info) }),
+        Err(backup::BackupError::NeedsPassword) => Ok(BackupPreview { needs_password: true, info: None }),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Replaces all data with the backup's, after saving a safety copy of the current data.
+#[tauri::command]
+fn restore_backup(state: State<AppState>, path: String, password: Option<String>) -> CmdResult<Household> {
+    let bytes = read_backup_file(&path)?;
+    let (h, _) = backup::decode(&bytes, password.as_deref()).map_err(err)?;
+    replace_all(&state, |c| db::replace_household(c, &h))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupStatus {
+    settings: db::BackupSettings,
+    /// Why the last automatic backup failed, if it did.
+    last_error: Option<String>,
+    /// Where to suggest putting automatic backups.
+    suggested_folder: String,
+}
+
+fn backup_status(app: &tauri::AppHandle, state: &AppState, conn: &Connection) -> CmdResult<BackupStatus> {
+    let suggested = app
+        .path()
+        .document_dir()
+        .map(|d| d.join("Finance Simulator backups").display().to_string())
+        .unwrap_or_default();
+    Ok(BackupStatus {
+        settings: db::get_backup_settings(conn).map_err(err)?,
+        last_error: state.auto.lock().ok().and_then(|a| a.last_error.clone()),
+        suggested_folder: suggested,
+    })
+}
+
+#[tauri::command]
+fn get_backup_settings(app: tauri::AppHandle, state: State<AppState>) -> CmdResult<BackupStatus> {
+    let conn = state.conn.lock().map_err(err)?;
+    backup_status(&app, &state, &conn)
+}
+
+/// Saves the automatic-backup switch and folder; turning it on writes one right away.
+#[tauri::command]
+fn save_backup_settings(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    settings: db::BackupSettings,
+) -> CmdResult<BackupStatus> {
+    let conn = state.conn.lock().map_err(err)?;
+    db::save_backup_settings(&conn, &settings).map_err(err)?;
+    if settings.auto_backup {
+        if let Ok(mut auto) = state.auto.lock() {
+            auto.dirty = true;
+        }
+        auto_backup(&state, &conn, true);
+    }
+    backup_status(&app, &state, &conn)
 }
 
 #[derive(Serialize)]
@@ -208,12 +381,12 @@ async fn safe_gift(
 
 #[tauri::command]
 fn load_demo(state: State<AppState>, which: demo::Demo) -> CmdResult<Household> {
-    mutate(&state, |c| db::replace_household(c, &demo::household(which)))
+    replace_all(&state, |c| db::replace_household(c, &demo::household(which)))
 }
 
 #[tauri::command]
 fn clear_household(state: State<AppState>) -> CmdResult<Household> {
-    mutate(&state, db::clear_household)
+    replace_all(&state, db::clear_household)
 }
 
 #[tauri::command]
@@ -269,13 +442,25 @@ fn delete_one_time_expense(state: State<AppState>, id: Id) -> CmdResult<Househol
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let db_path = dir.join("household.sqlite");
             let conn = db::open(&db_path)?;
-            app.manage(AppState { conn: Mutex::new(conn), db_path, simulation_cache: Mutex::new(Vec::new()) });
+            app.manage(AppState {
+                conn: Mutex::new(conn),
+                db_path,
+                app_data_dir: dir,
+                auto: Mutex::new(AutoBackup::default()),
+                simulation_cache: Mutex::new(Vec::new()),
+            });
             Ok(())
+        })
+        .menu(app_menu)
+        // File-menu choices are handled by the UI (they open its dialogs).
+        .on_menu_event(|app, event| {
+            let _ = app.emit("menu", event.id().as_ref());
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
@@ -302,7 +487,72 @@ pub fn run() {
             delete_debt,
             upsert_one_time_expense,
             delete_one_time_expense,
+            save_backup,
+            inspect_backup,
+            restore_backup,
+            get_backup_settings,
+            save_backup_settings,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Last automatic backup of anything changed since the previous one.
+            if let RunEvent::Exit = event {
+                let state = app.state::<AppState>();
+                if let Ok(conn) = state.conn.lock() {
+                    auto_backup(&state, &conn, true);
+                }
+            }
+        });
+}
+
+/// The standard Mac menus, plus Save Backup… / Open Backup… in File.
+fn app_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let sep = || PredefinedMenuItem::separator(app);
+    let about = Submenu::with_items(
+        app,
+        "Finance Simulator",
+        true,
+        &[
+            &PredefinedMenuItem::about(app, None, None)?,
+            &sep()?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::show_all(app, None)?,
+            &sep()?,
+            &PredefinedMenuItem::quit(app, None)?,
+        ],
+    )?;
+    let file = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[
+            &MenuItem::with_id(app, "save_backup", "Save Backup…", true, Some("CmdOrCtrl+S"))?,
+            &MenuItem::with_id(app, "open_backup", "Open Backup…", true, Some("CmdOrCtrl+O"))?,
+            &sep()?,
+            &PredefinedMenuItem::close_window(app, None)?,
+        ],
+    )?;
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &sep()?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+    let window = Submenu::with_items(
+        app,
+        "Window",
+        true,
+        &[&PredefinedMenuItem::minimize(app, None)?, &PredefinedMenuItem::fullscreen(app, None)?],
+    )?;
+    Menu::with_items(app, &[&about, &file, &edit, &window])
 }

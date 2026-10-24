@@ -25,6 +25,39 @@ export interface AppInfo {
 
 export type DemoName = "retiree" | "early_career";
 
+/** Mirrors src-tauri/src/backup.rs `BackupInfo`: what's in a backup file. */
+export interface BackupInfo {
+  appVersion: string;
+  /** RFC 3339; empty for a bare household file. */
+  savedAt: string;
+  formatVersion: number;
+  encrypted: boolean;
+  householdName: string;
+  people: number;
+  children: number;
+  accounts: number;
+  income: number;
+  debts: number;
+  plans: number;
+}
+
+export interface BackupPreview {
+  needsPassword: boolean;
+  info: BackupInfo | null;
+}
+
+export interface BackupSettings {
+  autoBackup: boolean;
+  backupFolder: string | null;
+  lastAutoBackup: string | null;
+}
+
+export interface BackupStatus {
+  settings: BackupSettings;
+  lastError: string | null;
+  suggestedFolder: string;
+}
+
 /** Current-law gift/estate figures and family-loan minimum rates (from engine/tax_tables). */
 export interface TaxFacts {
   taxYear: number;
@@ -60,6 +93,13 @@ export const api = {
     invoke<ScenarioDetail>("scenario_detail", { startYear, pathIndex, scenario }),
   loadDemo: (which: DemoName) => invoke<Household>("load_demo", { which }),
   clearHousehold: () => invoke<Household>("clear_household"),
+
+  // Backups (`.fsim`). `password` null or "" = no password.
+  saveBackup: (path: string, password: string | null) => invoke<void>("save_backup", { path, password }),
+  inspectBackup: (path: string, password: string | null) => invoke<BackupPreview>("inspect_backup", { path, password }),
+  restoreBackup: (path: string, password: string | null) => invoke<Household>("restore_backup", { path, password }),
+  getBackupSettings: () => invoke<BackupStatus>("get_backup_settings"),
+  saveBackupSettings: (settings: BackupSettings) => invoke<BackupStatus>("save_backup_settings", { settings }),
 
   upsertPerson: (person: Person) => invoke<Household>("upsert_person", { person }),
   deletePerson: (id: Id) => invoke<Household>("delete_person", { id }),

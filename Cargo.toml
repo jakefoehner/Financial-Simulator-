@@ -9,3 +9,10 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+# Password hashing is deliberately slow; keep tests quick in debug builds.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3

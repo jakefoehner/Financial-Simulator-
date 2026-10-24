@@ -12,6 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect } from "react";
+import { BackupDialogs } from "./components/BackupDialogs";
 import Accounts from "./pages/Accounts";
 import Debts from "./pages/Debts";
 import Guide from "./pages/Guide";
@@ -94,6 +95,7 @@ export default function App() {
           )}
         </div>
       </main>
+      <BackupDialogs />
     </div>
   );
 }

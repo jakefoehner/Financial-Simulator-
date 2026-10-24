@@ -137,6 +137,20 @@ Accounts can be **Private real estate fund**, **Private credit fund**, **Startup
 - These are planning assumptions (`engine/src/montecarlo.rs`, mirrored in `src/lib/simulation.ts`).
 - **Limits:** this is a planning estimate, not legal or tax advice. Confirm big gifting decisions with an estate attorney.
 
+## Saving & restoring your data
+Everything you enter can be saved to one **backup file** (`.fsim`) and opened again in this or any later version, on this Mac or another one. Use **Settings → Your data**, or the File menu (⌘S / ⌘O).
+
+- **What's in it:** the whole household: people, accounts (including private-fund terms), income, debts, spending and one-time costs, assumptions, and every plan with its decisions. App settings (like the backup folder) aren't included.
+- **Format** (`src-tauri/src/backup.rs`): JSON, `{ "format": "finance-simulator-backup", "formatVersion": 1, "appVersion", "savedAt", "household" }`. A plain backup opens in any text editor.
+- **Password (optional):** the file is encrypted with **XChaCha20-Poly1305**, with the key derived from the password by **Argon2id** (19 MiB, 2 passes; the parameters are stored in the file). A wrong password or a damaged file is refused cleanly. A forgotten password can't be recovered.
+- **Opening a backup replaces your data,** after showing what's in it (name, saved date, version, counts). A **safety copy** of the current data is saved first, and also before loading a demo or erasing everything. Safety copies go to the backup folder if automatic backups are on, otherwise to "Safety copies" in the app's data folder.
+- **Automatic backups** (optional, to a folder you choose, such as iCloud Drive): written after changes (at most every 5 minutes) and when you quit. The newest 10 are kept (only files the app named are ever deleted). They have no password.
+- **The compatibility promise:** a backup from any version opens in every later version.
+  - New fields always have defaults (`#[serde(default)]`), and unknown fields are ignored.
+  - Renames or restructures add a step to `upgrade()` in `backup.rs` and bump `formatVersion`.
+  - The golden files in `fixtures/backups/` are never edited, and a test opens every one of them.
+  - A file from a *newer* version gets a clear "please update the app" message.
+
 ## Releasing (signed DMG to share)
 `npm run release` builds a universal app, signs it with your Developer ID, has Apple notarize it, and copies `Finance Simulator <version>.dmg` to your Desktop. Recipients can open it with a plain double-click.
 

@@ -73,6 +73,7 @@ v2 hook: a "tax regime" setting that multiplies or replaces brackets and exempti
 - Results: KPI tiles (perpetual %, never-runs-out %, median ending net worth, median heir value), a fan chart, a scenario comparison overlay, and the cash-flow table.
 
 ## Sharing, import/export
+- **Backups (Phase 6, built):** see README "Saving & restoring your data" and the 2026-10-24 decision below. The read-only "Viewing" household, CSV and PDF below are later work.
 - **`.fsim` share file:** a gzipped JSON snapshot of the household plus scenarios, encrypted with **XChaCha20-Poly1305**. The key comes from a passphrase via **Argon2id**. The file starts with a header (magic, version, KDF params, salt, nonce). You email the file and share the passphrase another way (text or phone call).
 - An imported file opens as a separate **read-only "Viewing: <name>"** household, stored in its own SQLite file and deletable. Your own household is never mixed with it.
 - CSV import (accounts/holdings, using a documented template plus mapping for common brokerage exports). CSV export of tables. PDF report export (rendered from the Results view).
@@ -139,6 +140,12 @@ v2 hook: a "tax regime" setting that multiplies or replaces brackets and exempti
   4. GRATs: level annuity at the §7520 rate (6.20%, Nov 2026, held constant), paid at each anniversary. Rolling puts every payment into a new GRAT of the same term until the chosen age. Assets during a term stay in the estate (mortality risk). On the steady path the demo's mixed portfolio doesn't beat 6.2%, so GRATs show their value in the range of outcomes; Compare adds a 9-in-10 "strong markets" row when a plan has one.
   5. Charitable bequest = a share of the gross estate, deducted before estate tax; optionally taken from traditional IRA money first.
   6. New inputs: household home property tax and a "home mortgage" flag on debts (migration 0007).
+- **2026-10-24: Phase 6 = save & restore** (Jacob). Mom's data takes a while to enter, so it must be saved and reloaded in all future versions.
+  1. One `.fsim` backup file (JSON envelope with `formatVersion`) instead of CSV, since plans hold nested decisions.
+  2. The password is optional (XChaCha20-Poly1305 + Argon2id), off by default.
+  3. Automatic backups go to a chosen folder: after changes (at most every 5 minutes) and at quit, keeping 10, with no password. They're stored in a new `app_settings` table (migration 0008), outside the household.
+  4. Opening a backup replaces the household after a confirmation and a safety copy. Read-only viewing of someone else's file, CSV import/export and the PDF report are deferred.
+  5. Compatibility: additive fields default; renames go through `upgrade()`; golden files in `fixtures/backups/` must always open; newer files get an "update the app" message. Version bumped to 0.5.0.
 
 ## Verification
 - `cargo test -p engine`: tax tests against IRS worked examples and hand-computed cases (brackets, LTCG stacking, SS taxability, NIIT, RMD, gift/estate exemption). Golden-file projections for the demo households. Monte Carlo sanity checks: with zero volatility the result must equal the fixed-mode output, and a fixed seed must be reproducible.

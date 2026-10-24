@@ -12,6 +12,9 @@ interface AppStore {
   plan: Id | null;
   /** Last load error (save errors are shown inside the sheet that caused them). */
   loadError: string | null;
+  /** Set by the File menu or the Settings card; BackupDialogs runs the flow. */
+  backupRequest: "save" | "open" | null;
+  requestBackup: (r: "save" | "open" | null) => void;
   go: (s: Section) => void;
   setPlan: (plan: Id | null) => void;
   load: () => Promise<void>;
@@ -29,6 +32,8 @@ export const useApp = create<AppStore>((set, get) => ({
   household: null,
   plan: null,
   loadError: null,
+  backupRequest: null,
+  requestBackup: (backupRequest) => set({ backupRequest }),
   go: (section) => set({ section }),
   setPlan: (plan) => set({ plan }),
   load: async () => {

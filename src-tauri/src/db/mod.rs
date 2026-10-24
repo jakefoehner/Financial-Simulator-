@@ -6,6 +6,7 @@
 
 mod household;
 mod records;
+mod settings;
 
 use std::path::Path;
 
@@ -17,6 +18,7 @@ pub use records::{
     delete_account, delete_debt, delete_income, delete_one_time_expense, delete_person, delete_scenario,
     upsert_account, upsert_debt, upsert_income, upsert_one_time_expense, upsert_person, upsert_scenario,
 };
+pub use settings::{BackupSettings, get_backup_settings, record_auto_backup, save_backup_settings};
 
 /// Ordered migrations. Never edit a shipped entry; append a new one.
 const MIGRATIONS: &[&str] = &[
@@ -27,6 +29,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0005_scenarios.sql"),
     include_str!("../../migrations/0006_private_and_transfers.sql"),
     include_str!("../../migrations/0007_itemized_inputs.sql"),
+    include_str!("../../migrations/0008_app_settings.sql"),
 ];
 
 #[derive(Debug)]

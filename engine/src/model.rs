@@ -147,7 +147,7 @@ string_enum!(
 );
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct HouseholdInfo {
     pub name: String,
     /// Two-letter state code. Only used for the optional flat state rate.
