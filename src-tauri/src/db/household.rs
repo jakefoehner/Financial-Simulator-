@@ -24,6 +24,7 @@ pub fn load_household(conn: &Connection) -> Result<Household> {
         assumptions: get_assumptions(conn)?,
         scenarios: list_scenarios(conn)?,
         incoming: Vec::new(),
+        stock_risk: Vec::new(),
     })
 }
 

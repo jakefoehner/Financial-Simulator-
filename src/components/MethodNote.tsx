@@ -144,6 +144,16 @@ function MethodPanel({ assumptions: a, onClose }: { assumptions: Assumptions; on
             a new one with every payment. A GRAT still in its term at the estate date counts in your estate. GRATs pay
             off in strong markets and give nothing back in weak ones, so compare plans in the range of outcomes.
           </Section>
+          <Section title="Single stocks">
+            When you list positions on an account, prices come from Yahoo Finance (public data, refreshed when you open
+            the app or press Refresh prices). For each individual company (not funds or ETFs), the app compares its
+            monthly returns with the S&P 500's over up to 20 years. That shows how much it moves with the market (beta,
+            pulled a third of the way toward 1, as is standard) and how much it swings on its own. In every scenario,
+            the stock follows that year's market by its beta plus a random swing of its own, centered so that on average
+            it earns what your Assumptions say stocks earn. A big position in one company therefore widens the range:
+            rough markets get rougher and strong ones stronger. The steady path is unchanged. Stocks with under 3 years
+            of history use typical values (beta 1, 30% a year of their own).
+          </Section>
           <Section title="Private investments">
             Real estate funds, private credit, and other private investments pay their yearly cash (as a share of what
             you invested; you set the taxable share) and grow toward their sale value, which moves with replayed home

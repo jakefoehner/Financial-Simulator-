@@ -367,6 +367,8 @@ impl Family {
     /// The active household as the engine needs it: with money arriving from your plan when linked.
     pub fn household_for_engine(&self, start_year: i32) -> db::Result<Household> {
         let mut h = db::load_household(self.conn_ref())?;
+        // Single stocks swing more than the market (prices and fits are cached in the main file).
+        h.stock_risk = crate::prices::risk_for(&crate::prices::load_all(&self.main)?, &h);
         if let Some((main, person_id, plan)) = self.active_link()?
             && let Ok((incoming, _)) = incoming_for(&main, person_id, plan, start_year)
         {
@@ -561,6 +563,35 @@ mod tests {
         assert!(h.incoming.iter().any(|t| t.cash > 140_000.0));
         let proj = projection::project(&h, None, 2026).unwrap();
         assert!(proj.years.iter().any(|y| y.received_from_parent > 140_000.0));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cached_prices_give_the_demos_meta_its_own_risk() {
+        let (f, dir) = demo_family("risk");
+        assert!(f.household_for_engine(2026).unwrap().stock_risk.is_empty(), "no prices fetched yet");
+        let sample = |n: &str| {
+            std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/prices").join(n)).unwrap()
+        };
+        let market = crate::prices::parse_chart("^GSPC", &sample("GSPC.json")).unwrap().monthly;
+        let meta = crate::prices::parse_chart("META", &sample("META.json")).unwrap();
+        crate::prices::save(f.main(), &crate::prices::info_from(&meta, &market, "2026-10-24T18:00:00Z")).unwrap();
+        let h = f.household_for_engine(2026).unwrap();
+        assert_eq!(h.stock_risk.len(), 1);
+        assert_eq!(h.stock_risk[0].ticker, "META");
+        let plain = engine::montecarlo::simulate(&db::load_household(f.conn_ref()).unwrap(), None, 2026).unwrap();
+        let risky = engine::montecarlo::simulate(&h, None, 2026).unwrap();
+        let end = |s: &engine::montecarlo::Simulation| {
+            (*s.investable_real.p10.last().unwrap(), *s.investable_real.p90.last().unwrap())
+        };
+        println!(
+            "Pat with $1.9M of META: 1 in 10 {:.0} → {:.0}; 9 in 10 {:.0} → {:.0}",
+            end(&plain).0,
+            end(&risky).0,
+            end(&plain).1,
+            end(&risky).1
+        );
+        assert!(end(&risky).1 > end(&plain).1);
         let _ = std::fs::remove_dir_all(dir);
     }
 

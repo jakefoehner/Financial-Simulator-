@@ -32,6 +32,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0008_app_settings.sql"),
     include_str!("../../migrations/0009_family.sql"),
     include_str!("../../migrations/0010_holdings.sql"),
+    include_str!("../../migrations/0011_ticker_data.sql"),
 ];
 
 #[derive(Debug)]

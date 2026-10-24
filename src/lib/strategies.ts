@@ -151,7 +151,7 @@ export function strategies(facts: TaxFacts): Strategy[] {
         "Low-basis stock is usually better kept until death",
       ],
       inApp:
-        "Your basis travels with the gift; the kids' capital-gains tax (an assumed rate) is subtracted from what they receive.",
+        "Your basis travels with the gift; the kids' capital-gains tax (an assumed rate) is subtracted from what they receive. If you list the shares as positions on your account, a single stock's own ups and downs (from its price history) show in the range of outcomes, so you can compare giving a volatile, low-basis stock with keeping it.",
       tryIt: (h) => {
         const account = h.accounts.find((a) => giftableInKind(a.accountType));
         return firstChild(h) && account

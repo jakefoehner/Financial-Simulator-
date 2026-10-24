@@ -25,6 +25,10 @@ import {
 import { useEditor } from "../lib/useEditor";
 import { accountsCsv, saveCsv } from "../lib/csv";
 import { ImportSheet } from "./ImportSheet";
+import { HoldingsEditor } from "./HoldingsEditor";
+import { concentrations } from "../lib/holdings";
+import type { TickerInfo } from "../lib/api";
+import { RefreshCw } from "lucide-react";
 
 const MIX_PRESETS: { label: string; stocks: number; bonds: number }[] = [
   { label: "All stocks", stocks: 1, bonds: 0 },
@@ -91,6 +95,39 @@ export default function Accounts() {
   const setImportRequest = useApp((s) => s.setImportRequest);
   const [importing, setImporting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [tickers, setTickers] = useState<TickerInfo[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const mutate = useApp((s) => s.mutate);
+  const hasHoldings = accounts.some((a) => a.holdings.length > 0);
+  useEffect(() => {
+    api
+      .tickerInfo()
+      .then(setTickers)
+      .catch(() => {});
+  }, [household]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    setNote(null);
+    try {
+      const status = await api.refreshPrices(true);
+      setTickers(status.tickers);
+      await mutate(api.getHousehold);
+      setNote(
+        (status.updated.length > 0 ? `Updated ${status.updated.join(", ")}.` : "Nothing to update.") +
+          (status.failed.length > 0 ? ` Couldn't update: ${status.failed.join("; ")}.` : ""),
+      );
+    } catch (e) {
+      setNote(String(e));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  const concentrated = concentrations(household, tickers).filter((c) => c.share >= 0.1);
+  const lastPrice = tickers
+    .map((t) => t.priceDate)
+    .sort()
+    .at(-1);
   useEffect(() => {
     if (importRequest) {
       setImportRequest(false);
@@ -115,6 +152,11 @@ export default function Accounts() {
         subtitle="Everything you own: bank accounts, investments, retirement accounts, and property. Balances are what they're worth today."
         actions={
           <>
+            {hasHoldings && (
+              <Button variant="ghost" onClick={() => void refresh()} disabled={refreshing}>
+                <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} /> Refresh prices
+              </Button>
+            )}
             <Button onClick={() => setImporting(true)}>
               <Upload size={16} /> Import from a file…
             </Button>
@@ -130,6 +172,23 @@ export default function Accounts() {
         }
       />
       {note && <p className="mb-3 text-xs text-[var(--muted)] select-text">{note}</p>}
+      {hasHoldings && lastPrice && !note && (
+        <p className="mb-3 text-xs text-[var(--muted)]">Prices from Yahoo Finance, as of {lastPrice}.</p>
+      )}
+      {concentrated.map((c) => (
+        <div key={c.ticker} className="mb-4 rounded-lg bg-amber-500/10 px-4 py-3 text-sm">
+          <strong className="font-semibold">
+            Concentrated: {Math.round(c.share * 100)}% of your investments is in {c.ticker}
+          </strong>{" "}
+          <span className="text-[var(--muted)]">
+            ({formatUsd(c.value)}).{" "}
+            {c.fit
+              ? `Over ${c.fit.years} years it moved about ${c.fit.beta.toFixed(1)}× the market and swung about ${Math.round(c.fit.ownVol * 100)}% a year on its own (worst year: ${c.fit.worstYear}, ${Math.round(c.fit.worstReturn * 100)}%).`
+              : "A single company swings more than the market."}{" "}
+            The range of outcomes includes this risk; the steady path doesn't.
+          </span>
+        </div>
+      ))}
       {importing && <ImportSheet onClose={() => setImporting(false)} />}
 
       {accounts.length === 0 ? (
@@ -159,7 +218,19 @@ export default function Accounts() {
                   rowKey={(a) => a.id!}
                   onSelect={ed.open}
                   columns={[
-                    { header: "Name", cell: (a) => <span className="font-medium">{a.name}</span> },
+                    {
+                      header: "Name",
+                      cell: (a) => (
+                        <span>
+                          <span className="font-medium">{a.name}</span>
+                          {a.holdings.length > 0 && (
+                            <span className="ml-2 text-xs text-[var(--muted)]">
+                              {a.holdings.length} position{a.holdings.length === 1 ? "" : "s"}
+                            </span>
+                          )}
+                        </span>
+                      ),
+                    },
                     { header: "Type", cell: (a) => ACCOUNT_TYPE_LABELS[a.accountType] },
                     { header: "Owner", cell: (a) => ownerName(people, a.ownerId) },
                     {
@@ -365,6 +436,8 @@ function AccountForm({
           </p>
         </div>
       )}
+
+      {hasAllocation(a.accountType) && <HoldingsEditor account={a} patch={patch} />}
 
       {takesContributions(a.accountType) && (
         <Row>

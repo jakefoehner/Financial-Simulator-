@@ -61,7 +61,13 @@ fn draw_private_outcomes(rng: &mut impl Rng, h: &Household, horizon: usize) -> P
     let credit_loss = (0..horizon)
         .map(|_| if rng.random::<f64>() < CREDIT_DEFAULT_CHANCE { CREDIT_DEFAULT_LOSS } else { 0.0 })
         .collect();
-    PrivateOutcomes { startup_multiplier, credit_loss }
+    // Each single stock's own yearly shocks (drawn last, so plans without them are unchanged).
+    let stock_shocks = h
+        .stock_risk
+        .iter()
+        .map(|s| (0..horizon).map(|_| s.own_vol * crate::stocks::normal(rng.random(), rng.random())).collect())
+        .collect();
+    PrivateOutcomes { startup_multiplier, credit_loss, stock_shocks }
 }
 
 fn path_rng(index: usize) -> ChaCha8Rng {
@@ -416,6 +422,40 @@ mod tests {
     fn run(h: &Household, n: usize) -> Simulation {
         let table = history::centered(&h.assumptions);
         simulate_with(h, &[], 2026, TaxTables::current(), &table, n).unwrap()
+    }
+
+    /// Half the brokerage in one stock with the given risk.
+    fn concentrated(beta: f64, own_vol: f64) -> Household {
+        let mut h = retiree(80_000.0);
+        h.accounts[0].holdings = vec![crate::model::Holding {
+            ticker: "META".into(),
+            shares: 1_000.0,
+            price: 1_000.0,
+            ..Default::default()
+        }];
+        h.stock_risk = vec![crate::model::StockRisk { ticker: "META".into(), beta, own_vol }];
+        h
+    }
+
+    #[test]
+    fn a_stock_that_moves_like_the_market_changes_nothing() {
+        let plain = run(&retiree(80_000.0), 500);
+        let same = run(&concentrated(1.0, 0.0), 500);
+        assert_eq!(plain.investable_real.p50, same.investable_real.p50);
+        assert_eq!(plain.money_lasts, same.money_lasts);
+    }
+
+    #[test]
+    fn a_concentrated_volatile_stock_widens_the_range() {
+        let plain = run(&retiree(80_000.0), 2_000);
+        let risky = run(&concentrated(1.3, 0.35), 2_000);
+        let end = |s: &Simulation, b: fn(&Bands) -> &Vec<f64>| *b(&s.investable_real).last().unwrap();
+        let (p10, p90) = (end(&plain, |b| &b.p10), end(&plain, |b| &b.p90));
+        let (r10, r90) = (end(&risky, |b| &b.p10), end(&risky, |b| &b.p90));
+        println!("1 in 10: {p10:.0} → {r10:.0}; 9 in 10: {p90:.0} → {r90:.0}");
+        assert!(r10 < p10, "rough markets get rougher");
+        assert!(r90 > p90, "strong markets get stronger");
+        assert!(risky.money_lasts <= plain.money_lasts);
     }
 
     #[test]

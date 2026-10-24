@@ -69,7 +69,16 @@ export default function App() {
   const { section, go, household, family, loadError, load, switchHousehold, mutate } = useApp();
 
   useEffect(() => {
-    void load();
+    void load().then(async () => {
+      // Keep positions current: prices older than 12 hours are refreshed in the background.
+      if (!useApp.getState().household?.accounts.some((a) => a.holdings.length > 0)) return;
+      try {
+        const status = await api.refreshPrices(false);
+        if (status.updated.length > 0) await load();
+      } catch {
+        // Offline is fine: the last prices stay.
+      }
+    });
   }, [load]);
 
   const Page = PAGES[section];

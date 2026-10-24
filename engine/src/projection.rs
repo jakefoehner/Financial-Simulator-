@@ -351,6 +351,7 @@ fn holding(accts: &mut Vec<Acct>, account_type: AccountType, owner: &Person) -> 
         private: None,
         llc: None,
         grat: None,
+        stock_weights: Vec::new(),
     });
     accts.len() - 1
 }
@@ -372,6 +373,8 @@ struct Acct {
     private: Option<PrivateState>,
     llc: Option<LlcState>,
     grat: Option<GratState>,
+    /// Single stocks with their own risk: (index into `Household::stock_risk`, share of the balance).
+    stock_weights: Vec<(usize, f64)>,
 }
 
 /// A family LLC: this account holds your share of it.
@@ -434,6 +437,7 @@ impl Acct {
             }),
             llc: None,
             grat: None,
+            stock_weights: Vec::new(),
         }
     }
 
@@ -448,6 +452,7 @@ impl Acct {
             private: None,
             llc: None,
             grat: None,
+            stock_weights: Vec::new(),
             ..self.clone()
         }
     }
@@ -464,14 +469,24 @@ impl Acct {
         (take, basis)
     }
 
-    fn total_return(&self, m: &MarketYear) -> f64 {
+    /// `stock_returns`: this year's return for each `Household::stock_risk` entry.
+    fn total_return(&self, m: &MarketYear, stock_returns: &[f64]) -> f64 {
         match self.bucket {
             // Private investments move in their own step (payouts and exits).
             Bucket::Private => 0.0,
             Bucket::Cash => m.cash,
             Bucket::RealEstate => m.real_estate,
             _ if self.account_type == AccountType::Pension => m.bonds,
-            _ => self.stocks * m.stocks + self.bonds * m.bonds + self.cash * m.cash,
+            _ => {
+                // Single stocks with their own risk replace that much of the stock-market share.
+                let single: f64 = self.stock_weights.iter().map(|w| w.1).sum();
+                let own: f64 = self
+                    .stock_weights
+                    .iter()
+                    .map(|&(i, w)| w * stock_returns.get(i).copied().unwrap_or(m.stocks))
+                    .sum();
+                (self.stocks - single).max(0.0) * m.stocks + own + self.bonds * m.bonds + self.cash * m.cash
+            }
         }
     }
 
@@ -572,6 +587,8 @@ pub struct PrivateOutcomes {
     pub startup_multiplier: Vec<f64>,
     /// Per plan year: share of private-credit principal lost to defaults.
     pub credit_loss: Vec<f64>,
+    /// Per `Household::stock_risk` entry, per plan year: that stock's own shock (0 = none).
+    pub stock_shocks: Vec<Vec<f64>>,
 }
 
 impl PrivateOutcomes {
@@ -581,6 +598,10 @@ impl PrivateOutcomes {
 
     fn credit(&self, year: usize) -> f64 {
         self.credit_loss.get(year).copied().unwrap_or(0.0)
+    }
+
+    fn stock_shock(&self, stock: usize, year: usize) -> f64 {
+        self.stock_shocks.get(stock).and_then(|s| s.get(year)).copied().unwrap_or(0.0)
     }
 }
 
@@ -729,6 +750,22 @@ pub fn project_market(
     let start_age = (start_year - primary.birth_year).max(0) as u32;
 
     let mut accts: Vec<Acct> = h.accounts.iter().map(|a| Acct::from(a, person(a.owner_id))).collect();
+    // Each single stock's share of its account (only stocks with fitted risk; capped at the
+    // account's stock allocation). The shares stay fixed as balances grow (as if rebalanced).
+    for (acct, a) in accts.iter_mut().zip(&h.accounts) {
+        if a.balance <= 0.0 || !acct.bucket.spendable() && acct.bucket != Bucket::Education {
+            continue;
+        }
+        let mut room = acct.stocks;
+        for (i, risk) in h.stock_risk.iter().enumerate() {
+            let value: f64 = a.holdings.iter().filter(|x| x.ticker == risk.ticker).map(|x| x.value()).sum();
+            let w = (value / a.balance).min(room).max(0.0);
+            if w > 0.0 {
+                acct.stock_weights.push((i, w));
+                room -= w;
+            }
+        }
+    }
     for (k, a) in accts.iter_mut().enumerate() {
         if let Some(p) = a.private.as_mut()
             && a.account_type == AccountType::Startup
@@ -754,6 +791,7 @@ pub fn project_market(
             private: None,
             llc: None,
             grat: None,
+            stock_weights: Vec::new(),
         });
     }
     let savings_target = accts
@@ -1187,6 +1225,7 @@ pub fn project_market(
                             private: None,
                             llc: None,
                             grat: None,
+                            stock_weights: Vec::new(),
                         });
                         roth_target = Some(accts.len() - 1);
                         accts.len() - 1
@@ -1344,9 +1383,17 @@ pub fn project_market(
         // --- 5. Growth ---
         // The spendable portfolio's blended return this year; gifts are grown at it in the
         // estate so money given early is compared fairly with money kept.
+        let stock_returns: Vec<f64> = h
+            .stock_risk
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                crate::stocks::stock_return(m.stocks, r.stocks_return, s.beta, outcomes.stock_shock(i, n as usize))
+            })
+            .collect();
         let (mut spendable, mut grew) = (0.0, 0.0);
         for a in accts.iter_mut() {
-            let ret = a.total_return(&m);
+            let ret = a.total_return(&m, &stock_returns);
             if a.bucket.spendable() && a.balance > 0.0 {
                 spendable += a.balance;
                 grew += a.balance * ret;

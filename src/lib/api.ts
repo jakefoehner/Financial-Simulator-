@@ -73,6 +73,32 @@ export interface FamilyOverview {
   viewing: string | null;
 }
 
+/** Mirrors src-tauri/src/prices.rs `TickerInfo` (public market data, cached). */
+export interface TickerInfo {
+  ticker: string;
+  name: string;
+  /** "EQUITY" for a single company; "ETF", "MUTUALFUND"… for funds. */
+  instrument: string;
+  price: number;
+  priceDate: string;
+  fetchedAt: string;
+  fit: {
+    beta: number;
+    ownVol: number;
+    years: number;
+    firstYear: number;
+    lastYear: number;
+    worstYear: number;
+    worstReturn: number;
+  } | null;
+}
+
+export interface PriceStatus {
+  updated: string[];
+  failed: string[];
+  tickers: TickerInfo[];
+}
+
 /** Mirrors src-tauri/src/import.rs. */
 export interface ImportedAccount {
   name: string;
@@ -214,6 +240,10 @@ export const api = {
   applyImport: (choices: ImportChoice[]) => invoke<Household>("apply_import", { choices }),
   writeTextFile: (path: string, contents: string) => invoke<void>("write_text_file", { path, contents }),
   printPage: () => invoke<void>("print_page"),
+
+  // Prices (Yahoo Finance) and single-stock risk.
+  tickerInfo: () => invoke<TickerInfo[]>("ticker_info"),
+  refreshPrices: (force: boolean) => invoke<PriceStatus>("refresh_prices", { force }),
   saveBackupSettings: (settings: BackupSettings) => invoke<BackupStatus>("save_backup_settings", { settings }),
 
   upsertPerson: (person: Person) => invoke<Household>("upsert_person", { person }),

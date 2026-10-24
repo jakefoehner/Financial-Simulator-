@@ -163,6 +163,11 @@ v2 hook: a "tax regime" setting that multiplies or replaces brackets and exempti
   2. Positions are a JSON `holdings` column on the account (like `private_terms`), not a separate table: simpler, and they travel in backups.
   3. Read-only viewing swaps in a temporary `Family` and refuses edits in `mutate`, `replace_all` and the household commands.
   4. CSV exports, and a print-styled Report page saved as PDF through the native print panel (`WebviewWindow::print`).
+- **2026-10-24: Phase 10 = holdings, prices, single-stock risk** (Jacob).
+  1. **Prices:** Yahoo Finance's public chart API instead of Stooq, which now blocks automated downloads behind a browser check. It's free, needs no signup, and is cached with offline fallback. SimpleFIN is skipped for now.
+  2. **Risk:** a monthly regression on ^GSPC over 20 years, with a Blume-adjusted beta and annualized residual volatility. The first version used yearly returns vs. the Damodaran S&P series and gave META beta ≈ 3 from 13 points, which is too noisy, so it was replaced.
+  3. **Engine:** `Household.stock_risk` (runtime only, like `incoming`) and `PrivateOutcomes.stock_shocks` (normal draws per path, drawn after the other outcomes so plans without stocks are unchanged). The account's single-stock weights are carved out of its stock share. Beta 1 with no own volatility reproduces the old results exactly (tested).
+  4. Positions update the balance by delta. The concentration flag is at 10% of invested money. The demo gets a META position.
 
 ## Verification
 - `cargo test -p engine`: tax tests against IRS worked examples and hand-computed cases (brackets, LTCG stacking, SS taxability, NIIT, RMD, gift/estate exemption). Golden-file projections for the demo households. Monte Carlo sanity checks: with zero volatility the result must equal the fixed-mode output, and a fixed seed must be reproducible.

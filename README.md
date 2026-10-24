@@ -154,6 +154,20 @@ Accounts can be **Private real estate fund**, **Private credit fund**, **Startup
   - **CSV** of accounts and positions (Accounts → Export…) and of the plan's year-by-year steady path (Forecast → CSV).
   - **Report / PDF** (Forecast → Report / PDF): a printable summary of one plan for an estate attorney or CPA. It covers the household, the plan's decisions, the range of outcomes and chart, the family/estate card, and the assumptions and data sources. **Save as PDF…** opens the Mac print panel; choose PDF → Save as PDF.
 
+## Positions, prices and single-stock risk
+- **Positions:** any investment account can list positions (ticker, shares, cost basis), typed in or imported. Changing them moves the account balance by the change in their value; cash and anything unlisted stays as entered.
+- **Prices:** from **Yahoo Finance's public chart data** (no account or key), fetched for positions older than 12 hours when the app opens, or on **Refresh prices**.
+  - Cached in the main file's `ticker_data` table (migration 0011), with the name, instrument type, price and date.
+  - Offline, or for an unknown ticker, the last or typed-in price stays.
+  - *We first planned Stooq, but it now blocks automated downloads, so Yahoo is used instead. It's unofficial and may change; the cache and manual prices are the fallback.*
+- **Single-stock risk** (`engine/src/stocks.rs`). For each individual company (instrument type EQUITY; funds and ETFs move with the market):
+  - **Fit:** monthly returns over up to 20 years (Yahoo's monthly series; longer ranges come back quarterly) are regressed on the S&P 500's (^GSPC) for the same months.
+  - **Beta** is Blume-adjusted (⅔ × fitted + ⅓) and its **own volatility** is the leftover standard deviation × √12. Under 36 months of history uses typical values (beta 1, 30%).
+  - **In each replayed scenario year:** stock return = market + (beta − 1) × (market − your stocks Assumption) + a random shock with that volatility. On average it earns your stocks Assumption; it's just riskier. The steady path is unchanged.
+  - An account's single-stock share of its balance is fixed at today's weight (as if rebalanced), and comes out of the account's stock allocation.
+  - **Example:** META fits to beta 1.12 with 34% own volatility (2012–2026; worst year 2022, −64%). In the demo, $1.9M of META lowers Pat's 1-in-10 ending savings from $9.0M to $7.1M and raises the 9-in-10.
+- **Concentration flag:** on Accounts, any single stock at 10% or more of invested money is called out with its fitted risk.
+
 ## Searching
 The Scenarios page, the "Add a decision" picker and the Giving guide each have a search box. ⌘F focuses it, Esc clears it, and the text is kept while the app is open.
 - **How matching works:**

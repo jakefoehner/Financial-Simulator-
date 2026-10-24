@@ -3,6 +3,7 @@ mod db;
 mod demo;
 mod family;
 mod import;
+mod prices;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -227,6 +228,84 @@ fn read_import_mapped(path: String, mapping: import::ColumnMapping) -> CmdResult
 #[tauri::command]
 fn apply_import(state: State<AppState>, choices: Vec<import::ImportChoice>) -> CmdResult<Household> {
     mutate(&state, |c| import::apply(c, &choices))
+}
+
+// --- Prices ----------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PriceStatus {
+    updated: Vec<String>,
+    /// Readable reasons, e.g. "XYZ: not found".
+    failed: Vec<String>,
+    tickers: Vec<prices::TickerInfo>,
+}
+
+/// Cached prices and fitted risk for every ticker seen.
+#[tauri::command]
+fn ticker_info(state: State<AppState>) -> CmdResult<Vec<prices::TickerInfo>> {
+    let fam = state.family.lock().map_err(err)?;
+    prices::load_all(fam.main()).map_err(err)
+}
+
+/// Fetches prices for the tickers in the household being viewed (those older than 12 hours,
+/// or all when `force`), then updates its positions and balances. Works offline: anything
+/// that can't be fetched keeps its last price.
+#[tauri::command]
+async fn refresh_prices(state: State<'_, AppState>, force: bool) -> CmdResult<PriceStatus> {
+    let (wanted, cache) = {
+        let fam = state.family.lock().map_err(err)?;
+        let h = db::load_household(fam.conn_ref()).map_err(err)?;
+        let cache = prices::load_all(fam.main()).map_err(err)?;
+        let now = chrono::Utc::now();
+        let fresh = |t: &str| {
+            cache.iter().any(|c| {
+                c.ticker == t
+                    && chrono::DateTime::parse_from_rfc3339(&c.fetched_at)
+                        .is_ok_and(|f| (now - f.with_timezone(&chrono::Utc)).num_hours() < prices::MAX_AGE_HOURS)
+            })
+        };
+        let wanted: Vec<String> = prices::tickers_in(&h).into_iter().filter(|t| force || !fresh(t)).collect();
+        (wanted, cache)
+    };
+    let fetched = tauri::async_runtime::spawn_blocking(move || {
+        if wanted.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        let market = prices::fetch(prices::MARKET).map(|q| q.monthly).unwrap_or_default();
+        let at = chrono::Utc::now().to_rfc3339();
+        let (mut ok, mut failed) = (Vec::new(), Vec::new());
+        for t in wanted {
+            match prices::fetch(&t) {
+                Ok(q) => ok.push(prices::info_from(&q, &market, &at)),
+                Err(e) => failed.push(e),
+            }
+        }
+        (ok, failed)
+    })
+    .await
+    .map_err(err)?;
+    let (ok, failed) = fetched;
+    let mut fam = state.family.lock().map_err(err)?;
+    for info in &ok {
+        prices::save(fam.main(), info).map_err(err)?;
+    }
+    let cache = if ok.is_empty() { cache } else { prices::load_all(fam.main()).map_err(err)? };
+    // New prices into the positions (not while looking at someone else's file).
+    if fam.read_only.is_none() {
+        let h = db::load_household(fam.conn_ref()).map_err(err)?;
+        let mut changed = false;
+        for mut a in h.accounts {
+            if prices::reprice(&mut a, &cache) {
+                db::upsert_account(fam.conn(), &a).map_err(err)?;
+                changed = true;
+            }
+        }
+        if changed {
+            note_change(&state, &fam);
+        }
+    }
+    Ok(PriceStatus { updated: ok.into_iter().map(|i| i.ticker).collect(), failed, tickers: cache })
 }
 
 /// Writes a text file the user chose in a save dialog (CSV exports).
@@ -679,6 +758,8 @@ pub fn run() {
             apply_import,
             write_text_file,
             print_page,
+            ticker_info,
+            refresh_prices,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

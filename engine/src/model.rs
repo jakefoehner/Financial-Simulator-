@@ -433,6 +433,19 @@ pub struct Household {
     /// Computed when a child's plan is linked to a parent's; never stored.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub incoming: Vec<IncomingTransfer>,
+    /// Risk of individual stocks held (by ticker), from their price history. Computed when
+    /// prices are fetched; never stored. Empty = every stock moves with the market.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stock_risk: Vec<StockRisk>,
+}
+
+/// How one stock moves: with the market (`beta`) and on its own (`own_vol`, yearly).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockRisk {
+    pub ticker: String,
+    pub beta: f64,
+    pub own_vol: f64,
 }
 
 /// One year of money arriving from a parent's plan, in that year's (nominal) dollars.
