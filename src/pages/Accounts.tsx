@@ -341,8 +341,25 @@ function PrivateFields({
           </div>
         </Row>
       )}
+      {!startup && p.cashYield > 0 && (
+        <Toggle
+          label="Reinvest the payouts"
+          hint="On: payouts stay in the fund and it grows (still taxed each year). Off: they're paid to you as cash."
+          checked={p.reinvest}
+          onChange={(reinvest) => set({ reinvest })}
+        />
+      )}
       <p className="text-xs text-[var(--muted)]">
         Counted in your net worth and estate, but never sold to pay bills before it pays out.
+        {!startup && p.cashYield > 0 && !p.reinvest && (
+          <>
+            {" "}
+            <strong className="font-medium text-[var(--text)]">
+              Its cash payouts are already counted as income, so don't also add them on the Income page.
+            </strong>{" "}
+            They pay your spending and gifts first; only what's left over is saved.
+          </>
+        )}
       </p>
     </div>
   );

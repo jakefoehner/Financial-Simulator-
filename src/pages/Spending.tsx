@@ -8,6 +8,7 @@ import { formatUsd } from "../lib/format";
 import { useApp } from "../lib/store";
 import { currentYear, type OneTimeExpense } from "../lib/types";
 import { useEditor } from "../lib/useEditor";
+import OngoingGifts from "./OngoingGifts";
 
 function newExpense(): OneTimeExpense {
   return { id: null, name: "", year: currentYear() + 1, amount: 0 };
@@ -47,7 +48,7 @@ export default function Spending() {
               label="Per year"
               value={info.baseAnnualSpending}
               onChange={(v) => saveInfo({ baseAnnualSpending: v ?? 0 })}
-              hint="Housing, food, travel, insurance, giving: a typical year. Leave out debt payments and income taxes; those are added for you."
+              hint="Housing, food, travel, insurance: a typical year. Leave out debt payments, income taxes, and the gifts listed below; those are added for you."
             />
             <MoneyField
               label="Home property tax, per year"
@@ -61,6 +62,8 @@ export default function Spending() {
           )}
           {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
         </Card>
+
+        <OngoingGifts />
 
         <section>
           <h2 className="mb-2 px-1 text-sm font-semibold">Big one-time expenses</h2>

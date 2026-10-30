@@ -458,7 +458,7 @@ pub fn incoming_for(
     for (i, y) in proj.years.iter().enumerate() {
         let Some(t) = y.transfers_by_child.iter().find(|t| t.child_id == child) else { continue };
         let level = if i == 0 { 1.0 } else { proj.years[i - 1].price_level };
-        s.gifts_real += (t.cash + t.assets) / level;
+        s.gifts_real += (t.cash + t.assets + t.income_funds) / level;
         s.education_real += t.education / level;
         s.paid_for_you_real += t.paid_for_you / level;
         s.loans_in_real += t.loan_in / level;
@@ -473,6 +473,9 @@ pub fn incoming_for(
             loan_in: t.loan_in,
             loan_payment: t.loan_payment,
             inheritance: 0.0,
+            income_funds: t.income_funds,
+            income_yield: t.income_yield,
+            reinvest_income: t.reinvest_income,
         });
     }
     let estate = &proj.summary.estate;
@@ -549,9 +552,9 @@ mod tests {
         let (mut f, dir) = demo_family("incoming");
         let sam = f.list().unwrap()[1].id;
         f.switch(sam).unwrap();
-        // Base plan: no gifts, but an inheritance after Pat's estate age.
+        // Base plan: Pat's ongoing gifts ($19K + $24K a year) and an inheritance after her estate age.
         let base = f.incoming_summary(2026).unwrap().unwrap();
-        assert_eq!(base.gifts_real, 0.0);
+        assert!(base.gifts_real > 40.0 * 43_000.0, "{}", base.gifts_real);
         assert!(base.inheritance_real > 1_000_000.0);
         assert_eq!(base.inheritance_year, Some(1968 + 100 + 1));
         // Plan 1 helps Sam with a down payment.
@@ -607,6 +610,23 @@ mod tests {
         f.switch(sam).unwrap();
         assert_eq!(db::load_household(f.conn()).unwrap().people[0].name, "Sam");
         drop(f);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_mix_gift_arrives_as_stocks_and_income_funds() {
+        let (mut f, dir) = demo_family("mix");
+        let sam = f.list().unwrap()[1].id;
+        f.switch(sam).unwrap();
+        f.set_parent_plan(sam.unwrap(), Some(10)).unwrap();
+        let h = f.household_for_engine(2026).unwrap();
+        let first = h.incoming.iter().find(|t| t.income_funds > 0.0).expect("income funds arrive");
+        assert!((first.income_yield - 0.085).abs() < 1e-9);
+        assert!(first.assets > first.income_funds, "60% stocks, 40% income funds");
+        let p = engine::projection::project(&h, None, 2026).unwrap();
+        let y = p.years.iter().find(|y| y.year == first.year + 1).unwrap();
+        assert!(y.balances.private > 0.9 * first.income_funds, "a 'Gifted income funds' account");
+        assert!(y.private_income > 0.0, "paying out its yield");
         let _ = std::fs::remove_dir_all(dir);
     }
 

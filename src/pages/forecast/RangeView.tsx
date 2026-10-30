@@ -83,6 +83,16 @@ export default function RangeView({
         </div>
       </Card>
 
+      {sim.conditionalGifts && (
+        <div className="rounded-lg bg-accent/5 px-4 py-3 text-sm">
+          <strong className="font-semibold">Gifts that depend on your savings: </strong>
+          about {sim.conditionalGifts.madeAverage.toFixed(1)} of {sim.conditionalGifts.scheduled.toFixed(0)} happen on
+          average ({Math.round(sim.conditionalGifts.madeShare * 100)}%). Every one happens in{" "}
+          {Math.round(sim.conditionalGifts.allMadeShare * 100)}% of scenarios; in rougher markets some are skipped to
+          protect your savings. To give more reliably, raise the savings line or give less each time.
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatusTile
           label="Chance the money lasts"

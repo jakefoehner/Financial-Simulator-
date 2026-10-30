@@ -1,6 +1,6 @@
 [package]
 name = "finance-simulator"
-version = "0.5.0"
+version = "0.5.1"
 description = "Local-first financial what-if simulator"
 authors = ["Jacob Foehner"]
 edition = "2024"

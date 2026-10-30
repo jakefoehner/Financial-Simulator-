@@ -196,6 +196,57 @@ export function strategies(facts: TaxFacts): Strategy[] {
           : null,
     },
     {
+      id: "mix",
+      tags: ["kids"],
+      title: "Give a mix of investments, every few years",
+      status: "in_app",
+      summary:
+        "Give each child a set amount made of stocks and income funds (like Evergreen or Cliffwater), and repeat it every few years, but only while your own savings stay healthy.",
+      how: `For example, $1M each: 60% in stocks and 40% in income funds paying about 8.5% a year, which your kids can take as cash or reinvest. Each gift uses the yearly ${excl} exclusion and then your lifetime exemption. Repeating every 3–5 years moves growth out of your estate steadily. Setting a savings line ("only while my savings are above $X") means gifts happen in good markets and are skipped in rough ones, so you never give away what you'd need.`,
+      pros: [
+        "Moves large amounts, and their growth, out of your estate over time",
+        "Your kids get income they can use now, plus long-term growth",
+        "A savings line protects you if markets turn",
+      ],
+      cons: [
+        "Uses your lifetime exemption",
+        "Income funds pay taxable income to your kids and can lose money (defaults)",
+        "Income funds can be hard to sell quickly",
+      ],
+      inApp:
+        "Paid from your savings and recorded against the gift-tax limits. In the range of outcomes, gifts below your savings line are skipped, and the forecast shows how often they happen. In each child's own household, the stocks and income funds arrive as separate holdings paying their yearly rate.",
+      tryIt: (h) => {
+        const savings = h.accounts
+          .filter((a) =>
+            ["checking", "savings", "taxable", "trad_ira", "roth_ira", "trad_401k", "roth_401k"].includes(
+              a.accountType,
+            ),
+          )
+          .reduce((s, a) => s + a.balance, 0);
+        const age = nextAge(h);
+        return firstChild(h)
+          ? {
+              name: "$1M mix to each child, every 4 years",
+              notes: "60% stocks, 40% income funds at about 8.5% a year; only while savings stay at ¾ of today's.",
+              events: [
+                {
+                  type: "give_mix",
+                  to: null,
+                  amount: 1_000_000,
+                  fromAge: age,
+                  everyYears: 4,
+                  untilAge: Math.max(age, 80),
+                  minSavings: Math.round((savings * 0.75) / 100_000) * 100_000 || null,
+                  stocksShare: 0.6,
+                  incomeYield: 0.085,
+                  reinvestIncome: false,
+                },
+              ],
+            }
+          : null;
+      },
+    },
+    {
       id: "roth",
       tags: ["taxes"],
       title: "Roth conversions",

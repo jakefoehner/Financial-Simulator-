@@ -21,6 +21,23 @@ import { matches } from "../../lib/search";
 import { Highlight, SearchBox } from "../../components/SearchBox";
 import { EventSheet } from "./EventSheet";
 
+/** Accounts that count as spendable savings (for the "only if savings hold" default). */
+const SPENDABLE: string[] = [
+  "checking",
+  "savings",
+  "taxable",
+  "crypto",
+  "rsu",
+  "espp",
+  "options",
+  "trad_401k",
+  "roth_401k",
+  "trad_ira",
+  "roth_ira",
+  "hsa",
+  "pension",
+];
+
 /** Edit one plan: its name, notes, and timeline of decisions. Saved all at once. */
 export default function ScenarioEditor({
   household,
@@ -57,6 +74,7 @@ export default function ScenarioEditor({
       event: newEvent(type, {
         firstChild: kids[0]?.id ?? null,
         firstGiftAccount: giftAccounts[0]?.id ?? null,
+        savings: household.accounts.filter((a) => SPENDABLE.includes(a.accountType)).reduce((s, a) => s + a.balance, 0),
         age: nextAge,
         facts,
       }),

@@ -168,6 +168,12 @@ v2 hook: a "tax regime" setting that multiplies or replaces brackets and exempti
   2. **Risk:** a monthly regression on ^GSPC over 20 years, with a Blume-adjusted beta and annualized residual volatility. The first version used yearly returns vs. the Damodaran S&P series and gave META beta ≈ 3 from 13 points, which is too noisy, so it was replaced.
   3. **Engine:** `Household.stock_risk` (runtime only, like `incoming`) and `PrivateOutcomes.stock_shocks` (normal draws per path, drawn after the other outcomes so plans without stocks are unchanged). The account's single-stock weights are carved out of its stock share. Beta 1 with no own volatility reproduces the old results exactly (tested).
   4. Positions update the balance by delta. The concentration flag is at 10% of invested money. The demo gets a META position.
+- **2026-10-30: Phase 11 = Mom's notes** (relayed by Jacob after v0.4).
+  1. **Double counting:** answered in the app. Fund payouts come from account terms; rent comes from the Income page. Funds can now reinvest payouts.
+  2. **Investment types and saving data:** already shipped in v0.5 (Phases 5.1 and 6).
+  3. **Ongoing gifts are part of every plan** (`Household.ongoing`), counted as gifts, not spending.
+  4. **`GiveMix`:** per-child amount; a stocks share plus income funds at a yield (paid out or reinvested); repeats every N years through an age; optional "only while savings ≥ X (today's $)" check at the start of each due year. Monte Carlo reports gifts made vs. scheduled. Linked kids receive stocks plus a "Gifted income funds" private-credit holding.
+  5. Demo: Pat gives the yearly maximum plus $24K a year to each child, and plan 10 is "$1M mix every 4 years if savings hold" (kids' total $26.7M → $32.1M on the steady path; estate tax $4.1M → $0).
 
 ## Verification
 - `cargo test -p engine`: tax tests against IRS worked examples and hand-computed cases (brackets, LTCG stacking, SS taxability, NIIT, RMD, gift/estate exemption). Golden-file projections for the demo households. Monte Carlo sanity checks: with zero volatility the result must equal the fixed-mode output, and a fixed seed must be reproducible.

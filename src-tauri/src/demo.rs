@@ -170,7 +170,7 @@ mod tests {
     fn demo_plans_are_sane() {
         use engine::projection::project;
         let mut h = household(Demo::Retiree);
-        let plans = [None, Some(1), Some(2), Some(3), Some(4), Some(5), Some(6), Some(7), Some(8), Some(9)];
+        let plans = [None, Some(1), Some(2), Some(3), Some(4), Some(5), Some(6), Some(7), Some(8), Some(9), Some(10)];
         let run = |h: &engine::model::Household| plans.map(|p| project(h, p, 2026).unwrap().summary.estate);
         let now = run(&h);
         h.assumptions.exemption_cut_enabled = true;
@@ -185,7 +185,7 @@ mod tests {
                 e.children.iter().map(|c| c.total_real.round()).collect::<Vec<_>>()
             );
         }
-        let [base, home, yearly, loan, stock, big, charity, education, llc, grats] = &now;
+        let [base, home, yearly, loan, stock, big, charity, education, llc, grats, mix] = &now;
         assert!(base.estate_tax_real > 0.0, "an estate above the exemption should owe some estate tax");
         // Yearly exclusion gifts lower the estate tax and raise what the family gets in total.
         assert!(yearly.estate_tax_real < base.estate_tax_real);
@@ -220,10 +220,10 @@ mod tests {
         );
         assert!(charity.lifetime_charity_real > 900_000.0 && charity.charitable_bequest_real > 0.0);
         assert!(charity.estate_tax_real < base.estate_tax_real);
-        // 529s and tuition: almost no exemption used, and the kids come out ahead. ($95K in today's
-        // dollars is a bit more than 5 × next year's exclusion, which rounds down to $19K, so a
-        // sliver is above the superfunding limit.)
-        assert!(education.lifetime_taxable_gifts_real < 5_000.0, "{}", education.lifetime_taxable_gifts_real);
+        // 529s and tuition: the kids come out ahead. Pat's ongoing gifts already use each child's
+        // yearly exclusion, so the superfunded 529s (2 × $95K) now use exemption; tuition never does.
+        let added = education.lifetime_taxable_gifts_real - base.lifetime_taxable_gifts_real;
+        assert!(added > 150_000.0 && added < 2.0 * 95_000.0 * 1.05, "{added}");
         assert!(education.family_total_real > base.family_total_real);
         // A family LLC moves more for less exemption than giving the same value outright.
         println!(
@@ -235,8 +235,20 @@ mod tests {
         // GRATs use no exemption. On the steady path the brokerage mix earns less than the 6.2%
         // §7520 rate every year, so everything comes back and nothing passes; see the range test below.
         println!("GRATs: passed {:.0}; family total {:.0}", grats.lifetime_gifts_real, grats.family_total_real);
-        assert_eq!(grats.lifetime_taxable_gifts_real, 0.0);
+        assert!((grats.lifetime_taxable_gifts_real - base.lifetime_taxable_gifts_real).abs() < 1.0, "GRATs add none");
         assert!(grats.family_total_real >= base.family_total_real - 1.0);
+        // Mom's $1M mix every 4 years while savings hold: more for the kids, less estate tax.
+        println!(
+            "$1M mix: given {:.0}, family total {:.0} vs {:.0}, estate tax {:.0} vs {:.0}",
+            mix.lifetime_gifts_real,
+            mix.family_total_real,
+            base.family_total_real,
+            mix.estate_tax_real,
+            base.estate_tax_real
+        );
+        assert!(mix.lifetime_gifts_real > base.lifetime_gifts_real + 2_000_000.0);
+        assert!(mix.family_total_real > base.family_total_real);
+        assert!(mix.estate_tax_real < base.estate_tax_real);
     }
 
     /// GRATs are a bet on beating the §7520 rate: across market scenarios they should help

@@ -123,6 +123,21 @@ pub struct Simulation {
     pub net_worth_nominal: Bands,
     pub representatives: Vec<Representative>,
     pub estate: EstateRange,
+    /// "Give a mix" gifts set to happen only while savings hold: how often they did.
+    /// `None` when the plan has no such gifts.
+    pub conditional_gifts: Option<ConditionalGifts>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConditionalGifts {
+    /// Share of all scheduled gifts (across scenarios) that were made.
+    pub made_share: f64,
+    /// Gifts scheduled per scenario, and made on average.
+    pub scheduled: f64,
+    pub made_average: f64,
+    /// Share of scenarios where every scheduled gift was made.
+    pub all_made_share: f64,
 }
 
 /// 10th / 50th / 90th percentile of one number across scenarios.
@@ -170,6 +185,8 @@ struct PathOutcome {
     estate_tax_real: f64,
     family_total_real: f64,
     child_totals_real: Vec<f64>,
+    mix_made: u32,
+    mix_skipped: u32,
 }
 
 impl PathOutcome {
@@ -237,6 +254,8 @@ pub fn simulate_with(
                 estate_tax_real: p.summary.estate.estate_tax_real,
                 family_total_real: p.summary.estate.family_total_real,
                 child_totals_real: p.summary.estate.children.iter().map(|c| c.total_real).collect(),
+                mix_made: p.years.iter().map(|y| y.mix_gifts_made).sum(),
+                mix_skipped: p.years.iter().map(|y| y.mix_gifts_skipped).sum(),
             })
         })
         .collect::<Result<_, ProjectionError>>()?;
@@ -270,7 +289,17 @@ pub fn simulate_with(
         ]
     };
 
+    let made: u32 = outcomes.iter().map(|o| o.mix_made).sum();
+    let skipped: u32 = outcomes.iter().map(|o| o.mix_skipped).sum();
+    let conditional_gifts = (made + skipped > 0).then(|| ConditionalGifts {
+        made_share: made as f64 / (made + skipped) as f64,
+        scheduled: (made + skipped) as f64 / n,
+        made_average: made as f64 / n,
+        all_made_share: outcomes.iter().filter(|o| o.mix_skipped == 0).count() as f64 / n,
+    });
+
     Ok(Simulation {
+        conditional_gifts,
         scenarios,
         ages: steady.years.iter().map(|y| y.age).collect(),
         years: steady.years.iter().map(|y| y.year).collect(),
@@ -435,6 +464,43 @@ mod tests {
         }];
         h.stock_risk = vec![crate::model::StockRisk { ticker: "META".into(), beta, own_vol }];
         h
+    }
+
+    #[test]
+    fn conditional_gifts_happen_in_good_markets_only() {
+        let mut h = retiree(60_000.0);
+        h.people.push(Person {
+            id: Some(2),
+            name: "Kid".into(),
+            birth_year: 1990,
+            role: Role::Child,
+            ..h.people[0].clone()
+        });
+        // $100K every 3 years while savings stay above $1.9M (today's dollars; $2M today).
+        h.ongoing = vec![Event::GiveMix {
+            to: None,
+            amount: 100_000.0,
+            from_age: 68,
+            every_years: 3,
+            until_age: 89,
+            min_savings: Some(1_900_000.0),
+            stocks_share: 1.0,
+            income_yield: 0.0,
+            reinvest_income: false,
+        }];
+        let table = history::centered(&h.assumptions);
+        let events = projection::events_for(&h, None).unwrap();
+        let sim = simulate_with(&h, &events, 2026, TaxTables::current(), &table, 1_000).unwrap();
+        let g = sim.conditional_gifts.expect("the plan has conditional gifts");
+        println!(
+            "made {:.0}% of {:.1} scheduled; all made in {:.0}% of scenarios",
+            g.made_share * 100.0,
+            g.scheduled,
+            g.all_made_share * 100.0
+        );
+        assert!(g.made_share > 0.05 && g.made_share < 0.95, "some made, some skipped: {}", g.made_share);
+        assert_eq!(g.scheduled, 8.0);
+        assert!(run(&retiree(60_000.0), 100).conditional_gifts.is_none());
     }
 
     #[test]

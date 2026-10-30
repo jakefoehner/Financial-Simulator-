@@ -836,7 +836,7 @@ checksum = "4ef6b89e5b37196644d8796de5268852ff179b44e96276cf4290264843743bb7"
 
 [[package]]
 name = "engine"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "rand",
  "rand_chacha",
@@ -901,7 +901,7 @@ dependencies = [
 
 [[package]]
 name = "finance-simulator"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "argon2",
  "chacha20poly1305",

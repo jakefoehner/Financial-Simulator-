@@ -1,7 +1,7 @@
 //! Whole-household operations: load everything, replace everything (demo
 //! data, and later `.fsim` import), clear, and the household info row.
 
-use engine::model::{Assumptions, FilingStatus, Household, HouseholdInfo};
+use engine::model::{Assumptions, Event, FilingStatus, Household, HouseholdInfo};
 use rusqlite::{Connection, params};
 
 use super::records::{
@@ -23,6 +23,7 @@ pub fn load_household(conn: &Connection) -> Result<Household> {
         one_time_expenses: list_one_time_expenses(conn)?,
         assumptions: get_assumptions(conn)?,
         scenarios: list_scenarios(conn)?,
+        ongoing: get_ongoing(conn)?,
         incoming: Vec::new(),
         stock_risk: Vec::new(),
     })
@@ -133,6 +134,26 @@ pub fn save_info(conn: &Connection, info: &HouseholdInfo) -> Result<()> {
 
 /// Replaces all household data in one transaction. Record ids are kept, so
 /// references between records (account owner, income person) stay intact.
+fn get_ongoing(conn: &Connection) -> Result<Vec<Event>> {
+    let text: String = conn.query_row("SELECT ongoing FROM household WHERE id = 1", [], |r| r.get(0))?;
+    serde_json::from_str(&text).map_err(|e| Error::Invalid(format!("Couldn't read the gifts you already give: {e}")))
+}
+
+fn write_ongoing(conn: &Connection, events: &[Event]) -> Result<()> {
+    let text = serde_json::to_string(events).map_err(|e| Error::Invalid(e.to_string()))?;
+    conn.execute("UPDATE household SET ongoing = ?1 WHERE id = 1", [text])?;
+    Ok(())
+}
+
+/// Saves the gifts you already give (part of every plan).
+pub fn save_ongoing(conn: &Connection, events: &[Event]) -> Result<()> {
+    let h = load_household(conn)?;
+    for e in events {
+        e.validate(&h.people, &h.accounts).map_err(Error::Invalid)?;
+    }
+    write_ongoing(conn, events)
+}
+
 pub fn replace_household(conn: &mut Connection, h: &Household) -> Result<()> {
     h.validate().map_err(Error::Invalid)?;
     let tx = conn.transaction()?;
@@ -157,6 +178,7 @@ pub fn replace_household(conn: &mut Connection, h: &Household) -> Result<()> {
     for sc in &h.scenarios {
         insert_scenario(&tx, sc)?;
     }
+    write_ongoing(&tx, &h.ongoing)?;
     tx.commit()?;
     Ok(())
 }
@@ -175,7 +197,7 @@ fn delete_all(conn: &Connection) -> Result<()> {
     for t in DATA_TABLES {
         conn.execute(&format!("DELETE FROM {t}"), [])?;
     }
-    Ok(())
+    write_ongoing(conn, &[])
 }
 
 #[cfg(test)]

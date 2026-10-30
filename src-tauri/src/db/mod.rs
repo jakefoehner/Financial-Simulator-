@@ -13,7 +13,7 @@ use std::path::Path;
 use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension, Row};
 
-pub use household::{clear_household, load_household, replace_household, save_assumptions, save_info};
+pub use household::{clear_household, load_household, replace_household, save_assumptions, save_info, save_ongoing};
 pub use records::{
     delete_account, delete_debt, delete_income, delete_one_time_expense, delete_person, delete_scenario,
     upsert_account, upsert_debt, upsert_income, upsert_one_time_expense, upsert_person, upsert_scenario,
@@ -33,6 +33,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0009_family.sql"),
     include_str!("../../migrations/0010_holdings.sql"),
     include_str!("../../migrations/0011_ticker_data.sql"),
+    include_str!("../../migrations/0012_ongoing_gifts.sql"),
 ];
 
 #[derive(Debug)]

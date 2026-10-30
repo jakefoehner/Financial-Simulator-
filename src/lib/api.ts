@@ -7,6 +7,7 @@ import type {
   Account,
   Assumptions,
   Debt,
+  Event,
   Holding,
   Household,
   HouseholdInfo,
@@ -195,6 +196,8 @@ export const api = {
   getHousehold: () => invoke<Household>("get_household"),
   saveHouseholdInfo: (info: HouseholdInfo) => invoke<Household>("save_household_info", { info }),
   saveAssumptions: (assumptions: Assumptions) => invoke<Household>("save_assumptions", { assumptions }),
+  /** Gifts you already give (part of every plan). */
+  saveOngoing: (events: Event[]) => invoke<Household>("save_ongoing", { events }),
   taxFacts: () => invoke<TaxFacts>("tax_facts"),
   saveScenario: (scenario: Scenario) => invoke<Household>("save_scenario", { scenario }),
   deleteScenario: (id: Id) => invoke<Household>("delete_scenario", { id }),

@@ -510,6 +510,12 @@ fn save_household_info(state: State<AppState>, info: HouseholdInfo) -> CmdResult
     mutate(&state, |c| db::save_info(c, &info))
 }
 
+/// Saves the gifts you already give (part of every plan).
+#[tauri::command]
+fn save_ongoing(state: State<AppState>, events: Vec<engine::model::Event>) -> CmdResult<Household> {
+    mutate(&state, |c| db::save_ongoing(c, &events))
+}
+
 #[tauri::command]
 fn save_assumptions(state: State<AppState>, assumptions: Assumptions) -> CmdResult<Household> {
     mutate(&state, |c| db::save_assumptions(c, &assumptions))
@@ -760,6 +766,7 @@ pub fn run() {
             print_page,
             ticker_info,
             refresh_prices,
+            save_ongoing,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

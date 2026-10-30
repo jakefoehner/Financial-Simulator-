@@ -144,6 +144,13 @@ function MethodPanel({ assumptions: a, onClose }: { assumptions: Assumptions; on
             a new one with every payment. A GRAT still in its term at the estate date counts in your estate. GRATs pay
             off in strong markets and give nothing back in weak ones, so compare plans in the range of outcomes.
           </Section>
+          <Section title="Where income comes from">
+            Paychecks, pensions and rent from property you own come from the Income page. Private funds (real estate and
+            credit funds) pay their cash from their own terms on the Accounts page, so they aren't entered twice. All
+            income first pays your spending, taxes, debts and gifts; only what's left is saved. Gifts you already give
+            (on the Spending page) are part of every plan, and repeating gifts set to "only if my savings hold up" are
+            skipped in any year your savings fall below the line you chose.
+          </Section>
           <Section title="Single stocks">
             When you list positions on an account, prices come from Yahoo Finance (public data, refreshed when you open
             the app or press Refresh prices). For each individual company (not funds or ETFs), the app compares its

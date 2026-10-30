@@ -101,6 +101,12 @@ pub fn upsert_person(conn: &Connection, p: &Person) -> Result<Id> {
 /// any scenario decisions naming them (gifts, loans, home help) are dropped.
 pub fn delete_person(conn: &Connection, id: Id) -> Result<()> {
     delete_one(conn, "person", "person", id)?;
+    let mut ongoing = super::load_household(conn)?.ongoing;
+    let before = ongoing.len();
+    ongoing.retain(|e| e.recipient() != Some(id));
+    if ongoing.len() != before {
+        super::save_ongoing(conn, &ongoing)?;
+    }
     for mut sc in list_scenarios(conn)? {
         let before = sc.events.len();
         sc.events.retain(|e| e.recipient() != Some(id));

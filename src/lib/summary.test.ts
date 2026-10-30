@@ -23,6 +23,7 @@ const empty: Household = {
   oneTimeExpenses: [],
   assumptions: DEFAULT_ASSUMPTIONS,
   scenarios: [],
+  ongoing: [],
 };
 
 describe("summarize", () => {

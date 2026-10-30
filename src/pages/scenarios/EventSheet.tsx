@@ -128,6 +128,90 @@ export function EventSheet({
         </>
       )}
 
+      {e.type === "give_mix" && (
+        <>
+          <Row>
+            <SelectField<Id>
+              label="To"
+              value={e.to ?? 0}
+              onChange={(v) => patch({ to: v === 0 ? null : v })}
+              options={[{ value: 0, label: "Each child" }, ...childOptions]}
+            />
+            <MoneyField
+              label={e.to == null ? "Amount to each child" : "Amount"}
+              value={e.amount}
+              onChange={(v) => patch({ amount: v ?? 0 })}
+            />
+          </Row>
+          <Row>
+            <NumberField
+              label="First gift at your age"
+              value={e.fromAge}
+              onChange={(v) => patch({ fromAge: v ?? e.fromAge, untilAge: Math.max(e.untilAge, v ?? e.fromAge) })}
+            />
+            <SelectField<number>
+              label="Repeat"
+              value={e.everyYears}
+              onChange={(everyYears) => patch({ everyYears })}
+              options={[
+                { value: 0, label: "Just once" },
+                ...[2, 3, 4, 5, 6, 8, 10].map((n) => ({ value: n, label: `Every ${n} years` })),
+              ]}
+            />
+          </Row>
+          {e.everyYears > 0 && (
+            <NumberField
+              label="Last gift no later than your age"
+              value={e.untilAge}
+              onChange={(v) => patch({ untilAge: Math.max(e.fromAge, v ?? e.untilAge) })}
+            />
+          )}
+          <Toggle
+            label="Only if my savings hold up"
+            hint="“If the world continues to be kind to us”: a gift is skipped in any year your spendable savings (cash, brokerage, retirement accounts, in today's dollars) are below the amount you set."
+            checked={e.minSavings != null}
+            onChange={(on) => patch({ minSavings: on ? 10_000_000 : null })}
+          />
+          {e.minSavings != null && (
+            <MoneyField
+              label="Give only while my savings are at least"
+              value={e.minSavings}
+              onChange={(v) => patch({ minSavings: v ?? 0 })}
+            />
+          )}
+          <div className="grid gap-3 rounded-lg border border-[var(--border)] p-4">
+            <p className="text-xs font-medium text-[var(--muted)]">What each gift is made of</p>
+            <Row>
+              <PercentField
+                label="In stocks"
+                decimals={0}
+                value={e.stocksShare}
+                onChange={(v) => patch({ stocksShare: Math.min(1, Math.max(0, v)) })}
+              />
+              <PercentField
+                label="Income funds pay per year"
+                hint={`The other ${Math.round((1 - e.stocksShare) * 100)}%, e.g. Evergreen (~7%) and Cliffwater (~10%): about 8.5% on average.`}
+                value={e.incomeYield}
+                onChange={(v) => patch({ incomeYield: Math.min(0.25, Math.max(0, v)) })}
+              />
+            </Row>
+            <Toggle
+              label="Reinvest the income funds' payouts"
+              hint="Off: your kids receive the payouts as cash (taxed as income). On: they stay in the fund and it grows (still taxed each year)."
+              checked={e.reinvestIncome}
+              onChange={(reinvestIncome) => patch({ reinvestIncome })}
+            />
+          </div>
+          <p className="rounded-lg bg-accent/5 px-3 py-2 text-xs text-[var(--muted)]">
+            Each gift is paid from your savings and counts against your lifetime exemption above the {exclusion} yearly
+            exclusion (keep giving that separately in "Gifts you already give"). In the range of outcomes, gifts that
+            fall below your savings line are skipped, so the forecast shows how often they happen. In a child's own
+            household (linked to yours), the stocks arrive in a brokerage account and the income funds as a fund paying
+            its yearly rate.
+          </p>
+        </>
+      )}
+
       {e.type === "family_loan" && (
         <>
           <Row>

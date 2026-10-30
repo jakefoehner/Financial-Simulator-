@@ -43,6 +43,9 @@ export default function Income() {
   const primaryId = people.find((p) => p.role === "primary")?.id ?? null;
   const ssPeople = people.filter((p) => p.role === "primary" || p.role === "spouse");
   const personName = (id: Id | null) => people.find((p) => p.id === id)?.name ?? "Household";
+  const accounts = useApp((s) => s.household!.accounts);
+  // Private funds already pay income from their own terms; listed so it isn't entered twice.
+  const fundPayouts = accounts.filter((a) => a.private && a.private.cashYield > 0 && !a.private.reinvest);
 
   return (
     <>
@@ -55,6 +58,18 @@ export default function Income() {
           </Button>
         }
       />
+
+      {fundPayouts.length > 0 && (
+        <div className="mb-5 rounded-lg bg-accent/5 px-4 py-3 text-sm">
+          <strong className="font-semibold">Already counted, don't add here: </strong>
+          payouts from{" "}
+          {fundPayouts
+            .map((a) => `${a.name} (about ${formatUsd(a.private!.cashYield * (a.costBasis ?? a.balance))} a year)`)
+            .join(", ")}
+          . They come from those accounts' terms on the Accounts page. Rent from a property you own does go here (the
+          property's value is on Accounts).
+        </div>
+      )}
 
       <div className="grid gap-6">
         <Card title="Social Security">

@@ -85,6 +85,25 @@ describe("eventSummary", () => {
     ).toBe("Age 59 · Give each child $1M from Taxable brokerage");
   });
 
+  it("describes a repeating mix gift", () => {
+    expect(
+      summary({
+        type: "give_mix",
+        to: null,
+        amount: 1_000_000,
+        fromAge: 59,
+        everyYears: 4,
+        untilAge: 79,
+        minSavings: 10_000_000,
+        stocksShare: 0.6,
+        incomeYield: 0.085,
+        reinvestIncome: false,
+      }),
+    ).toBe(
+      "Ages 59–79, every 4 yrs · Give each child $1M: 60% stocks, 40% income funds at 8.5%, if your savings are above $10M",
+    );
+  });
+
   it("describes charity, education, LLC and GRAT decisions", () => {
     const acct = () => "Brokerage";
     const s = (e: Event) => eventSummary(e, (id) => names[id], formatUsdCompact, formatPercent, acct);

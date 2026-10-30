@@ -137,6 +137,10 @@ pub struct YearResult {
     pub transfers_by_child: Vec<ChildTransfer>,
     /// Money that arrived from a parent's plan this year (gifts, 529s, loans, inheritance).
     pub received_from_parent: f64,
+    /// "Give a mix" gifts due this year that were made, and that were skipped because
+    /// savings were below the line set for them.
+    pub mix_gifts_made: u32,
+    pub mix_gifts_skipped: u32,
     /// Gift tax paid this year (only once the lifetime exemption is used up).
     pub gift_tax: f64,
     /// Cash given this year (gifts and down payments; excludes forgiven loan principal).
@@ -194,6 +198,10 @@ pub struct ChildTransfer {
     pub paid_for_you: f64,
     pub loan_in: f64,
     pub loan_payment: f64,
+    /// Given as income funds paying `income_yield` (value-weighted), paid out or reinvested.
+    pub income_funds: f64,
+    pub income_yield: f64,
+    pub reinvest_income: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -270,6 +278,8 @@ enum Via {
     Assets,
     Education,
     PaidForYou,
+    /// Income funds with this yearly payout, reinvested or not.
+    IncomeFunds(f64, bool),
     /// Forgiven loan principal (seen by the child as smaller payments) or a superfund spread:
     /// counts in the gift ledger only.
     LedgerOnly,
@@ -314,6 +324,11 @@ impl Ledger {
             }
             Via::Education => t.education += amount,
             Via::PaidForYou => t.paid_for_you += amount,
+            Via::IncomeFunds(yield_, reinvest) => {
+                t.income_yield = (t.income_yield * t.income_funds + yield_ * amount) / (t.income_funds + amount);
+                t.income_funds += amount;
+                t.reinvest_income = reinvest;
+            }
             Via::LedgerOnly => {}
         }
     }
@@ -352,6 +367,49 @@ fn holding(accts: &mut Vec<Acct>, account_type: AccountType, owner: &Person) -> 
         llc: None,
         grat: None,
         stock_weights: Vec::new(),
+        gifted_funds: false,
+    });
+    accts.len() - 1
+}
+
+/// Index of the "Gifted income funds" account (income funds received from a parent),
+/// added as a private-credit holding the first time.
+fn gifted_income_funds(accts: &mut Vec<Acct>, owner: &Person, cash_yield: f64, reinvest: bool) -> usize {
+    if let Some(i) = accts.iter().position(|a| a.gifted_funds) {
+        return i;
+    }
+    let terms = PrivateTerms {
+        cash_yield,
+        taxable_share: 1.0,
+        exit_year: None,
+        exit_multiple: 1.0,
+        companies: 1,
+        qsbs: false,
+        reinvest,
+    };
+    accts.push(Acct {
+        bucket: Bucket::Private,
+        account_type: AccountType::PrivateCredit,
+        owner_birth_year: owner.birth_year,
+        owner_id: owner.id,
+        balance: 0.0,
+        basis: 0.0,
+        stocks: 0.0,
+        bonds: 0.0,
+        cash: 1.0,
+        contribution: 0.0,
+        employer_match: 0.0,
+        private: Some(PrivateState {
+            terms,
+            invested: 0.0,
+            market_factor: 1.0,
+            startup_multiplier: 1.0,
+            exited: false,
+        }),
+        llc: None,
+        grat: None,
+        stock_weights: Vec::new(),
+        gifted_funds: true,
     });
     accts.len() - 1
 }
@@ -375,6 +433,8 @@ struct Acct {
     grat: Option<GratState>,
     /// Single stocks with their own risk: (index into `Household::stock_risk`, share of the balance).
     stock_weights: Vec<(usize, f64)>,
+    /// The "Gifted income funds" account created for money from a parent.
+    gifted_funds: bool,
 }
 
 /// A family LLC: this account holds your share of it.
@@ -438,6 +498,7 @@ impl Acct {
             llc: None,
             grat: None,
             stock_weights: Vec::new(),
+            gifted_funds: false,
         }
     }
 
@@ -453,6 +514,7 @@ impl Acct {
             llc: None,
             grat: None,
             stock_weights: Vec::new(),
+            gifted_funds: false,
             ..self.clone()
         }
     }
@@ -615,11 +677,19 @@ pub fn horizon_years(h: &Household, start_year: i32) -> Result<usize, Projection
 }
 
 /// The decisions in `scenario` (`None` = the base plan, no decisions).
+/// The decisions in `scenario` (`None` = the base plan), after the gifts you already give,
+/// which every plan includes.
 pub fn events_for(h: &Household, scenario: Option<Id>) -> Result<Vec<Event>, ProjectionError> {
-    match scenario {
-        None => Ok(Vec::new()),
-        Some(id) => h.scenario(id).map(|s| s.events.clone()).ok_or(ProjectionError::UnknownScenario),
+    let mut events = h.ongoing.clone();
+    if let Some(id) = scenario {
+        events.extend(h.scenario(id).map(|s| s.events.clone()).ok_or(ProjectionError::UnknownScenario)?);
     }
+    Ok(events)
+}
+
+/// Whether a repeating gift falls due at `age`: `from`, then every `every` years through `until`.
+pub fn gift_due(age: u32, from: u32, every: u32, until: u32) -> bool {
+    age >= from && age <= until && (if every == 0 { age == from } else { (age - from).is_multiple_of(every) })
 }
 
 /// Runs the steady-path projection for `start_year` (normally the current calendar year).
@@ -792,6 +862,7 @@ pub fn project_market(
             llc: None,
             grat: None,
             stock_weights: Vec::new(),
+            gifted_funds: false,
         });
     }
     let savings_target = accts
@@ -935,7 +1006,14 @@ pub fn project_market(
                 continue;
             }
             let payout = p.terms.cash_yield * p.invested.max(0.0);
-            private_income += payout;
+            if p.terms.reinvest {
+                // Reinvested: the fund grows by its payout (still taxed below).
+                a.balance += payout;
+                a.basis += payout;
+                p.invested += payout;
+            } else {
+                private_income += payout;
+            }
             let taxable = payout * p.terms.taxable_share;
             if account_type == AccountType::RealEstateFund {
                 private_rental_taxable += taxable;
@@ -1077,6 +1155,10 @@ pub fn project_market(
         let (mut charity_cash, mut charity_property, mut charity_cash_public) = (0.0, 0.0, 0.0);
         let (mut education, mut llc_gifts) = (0.0, 0.0);
         let in_years = |from: u32, years: u32| primary_age >= from && primary_age < from + years;
+        // Spendable savings at the start of the year, in today's dollars ("if the world is kind").
+        let savings_now_real =
+            accts.iter().filter(|a| a.bucket.spendable()).map(|a| a.balance).fold(0.0, f64::add) / price;
+        let (mut mix_gifts_made, mut mix_gifts_skipped) = (0u32, 0u32);
         for (ei, e) in events.iter().enumerate() {
             match e {
                 Event::HomeHelp { to, age, gift, loan } if *age == primary_age => {
@@ -1125,6 +1207,42 @@ pub fn project_market(
                     if primary_age >= *from_age && primary_age <= *to_age =>
                 {
                     roth_conversion_wanted += per_year * price;
+                }
+                Event::GiveMix {
+                    to,
+                    amount,
+                    from_age,
+                    every_years,
+                    until_age,
+                    min_savings,
+                    stocks_share,
+                    income_yield,
+                    reinvest_income,
+                } if gift_due(primary_age, *from_age, *every_years, *until_age) => {
+                    if min_savings.is_some_and(|m| savings_now_real < m) {
+                        mix_gifts_skipped += 1;
+                        continue;
+                    }
+                    mix_gifts_made += 1;
+                    let recipients: Vec<Id> = match to {
+                        Some(id) => vec![*id],
+                        None => children.clone(),
+                    };
+                    let each = amount * price;
+                    let stocks = each * stocks_share;
+                    for id in recipients {
+                        cash_gifts += each;
+                        // Bought new for the child, so their cost basis is what was paid.
+                        ledger.give(id, stocks, stocks, stocks, 0.0, Via::Assets);
+                        ledger.give(
+                            id,
+                            each - stocks,
+                            each - stocks,
+                            each - stocks,
+                            0.0,
+                            Via::IncomeFunds(*income_yield, *reinvest_income),
+                        );
+                    }
                 }
                 Event::CharityGift { amount, from_age, years, account_id, donor_advised }
                     if in_years(*from_age, *years) =>
@@ -1226,6 +1344,7 @@ pub fn project_market(
                             llc: None,
                             grat: None,
                             stock_weights: Vec::new(),
+                            gifted_funds: false,
                         });
                         roth_target = Some(accts.len() - 1);
                         accts.len() - 1
@@ -1256,7 +1375,20 @@ pub fn project_market(
                 accts[k].balance += t.education;
                 accts[k].basis += t.education;
             }
-            received_from_parent += t.cash + t.assets + t.education + t.paid_for_you + t.loan_in + t.inheritance;
+            if t.income_funds > 0.0 {
+                let k = gifted_income_funds(&mut accts, primary, t.income_yield, t.reinvest_income);
+                let a = &mut accts[k];
+                if let Some(p) = a.private.as_mut() {
+                    // Blend the payout rate by value when more arrives.
+                    p.terms.cash_yield = (p.terms.cash_yield * p.invested + t.income_yield * t.income_funds)
+                        / (p.invested + t.income_funds).max(1e-9);
+                    p.invested += t.income_funds;
+                }
+                a.balance += t.income_funds;
+                a.basis += t.income_funds;
+            }
+            received_from_parent +=
+                t.cash + t.assets + t.education + t.paid_for_you + t.loan_in + t.inheritance + t.income_funds;
         }
         // Gift tax is due only above the exemption, never less than what's already sheltered.
         let shelter = t.estate_exemption(year, index, &r).max(sheltered_gifts);
@@ -1448,6 +1580,8 @@ pub fn project_market(
             gifts_by_child: ledger.gifts,
             transfers_by_child: ledger.transfers,
             received_from_parent,
+            mix_gifts_made,
+            mix_gifts_skipped,
             gift_tax,
             cash_gifts,
             loans_made,
@@ -2263,6 +2397,88 @@ mod tests {
         assert_eq!(at(&p, 2027).taxes, at(&base, 2027).taxes);
         close(at(&p, 2060).received_from_parent, 1_000_000.0, 0.01);
         assert!(at(&p, 2060).net_worth > at(&base, 2060).net_worth + 1_000_000.0);
+    }
+
+    fn mix(every: u32, min_savings: Option<f64>, reinvest: bool) -> Event {
+        Event::GiveMix {
+            to: None,
+            amount: 1_000_000.0,
+            from_age: 58,
+            every_years: every,
+            until_age: 66,
+            min_savings,
+            stocks_share: 0.6,
+            income_yield: 0.085,
+            reinvest_income: reinvest,
+        }
+    }
+
+    #[test]
+    fn gifts_you_already_give_are_in_every_plan() {
+        let mut h = family(vec![Event::RothConversion { per_year: 0.0, from_age: 70, to_age: 70 }]);
+        h.ongoing =
+            vec![Event::CashGift { to: None, amount: 0.0, from_age: 58, years: 40, max_annual_exclusion: true }];
+        let base = project(&h, None, 2026).unwrap();
+        let plan = project(&h, Some(1), 2026).unwrap();
+        close(base.years[0].gifts, 2.0 * 19_000.0, 0.01);
+        close(plan.years[0].gifts, 2.0 * 19_000.0, 0.01);
+        assert_eq!(base.years[0].lifetime_taxable_gifts, 0.0);
+    }
+
+    #[test]
+    fn a_mix_gift_repeats_and_splits_into_stocks_and_income_funds() {
+        let mut h = family(vec![mix(4, None, false)]);
+        h.accounts[0].balance = 20_000_000.0;
+        h.accounts[0].cost_basis = Some(20_000_000.0);
+        let p = project(&h, Some(1), 2026).unwrap();
+        let gift_ages: Vec<u32> = p.years.iter().filter(|y| y.mix_gifts_made > 0).map(|y| y.age).collect();
+        assert_eq!(gift_ages, [58, 62, 66]);
+        // $1M to each of two children, all reported: 2 × (1M − 19K) of exemption.
+        close(p.years[0].gifts, 2_000_000.0, 0.01);
+        close(p.years[0].lifetime_taxable_gifts, 2.0 * 981_000.0, 0.01);
+        let t = &p.years[0].transfers_by_child[0];
+        close(t.assets, 600_000.0, 0.01);
+        close(t.income_funds, 400_000.0, 0.01);
+        close(t.income_yield, 0.085, 1e-12);
+        assert!(!t.reinvest_income);
+        // "every_years = 0" means once.
+        let once = project(&family(vec![mix(0, None, false)]), Some(1), 2026).unwrap();
+        assert_eq!(once.years.iter().map(|y| y.mix_gifts_made).sum::<u32>(), 1);
+    }
+
+    #[test]
+    fn a_mix_gift_is_skipped_when_savings_are_below_the_line() {
+        // $5M of savings; gifts only if savings are at least $4.5M (today's dollars).
+        let p = project(&family(vec![mix(4, Some(4_500_000.0), false)]), Some(1), 2026).unwrap();
+        let made: u32 = p.years.iter().map(|y| y.mix_gifts_made).sum();
+        let skipped: u32 = p.years.iter().map(|y| y.mix_gifts_skipped).sum();
+        // The first $2M gift drops savings to about $3M, so the later ones are skipped.
+        assert_eq!((made, skipped), (1, 2));
+    }
+
+    #[test]
+    fn income_funds_from_a_parent_pay_out_or_reinvest() {
+        let child = |reinvest: bool| {
+            let mut h = household(vec![me(1996)], vec![account(AccountType::Checking, 50_000.0, None, 0.0)], 0.0);
+            h.incoming = vec![crate::model::IncomingTransfer {
+                year: 2026,
+                income_funds: 400_000.0,
+                income_yield: 0.085,
+                reinvest_income: reinvest,
+                ..Default::default()
+            }];
+            project(&h, None, 2026).unwrap()
+        };
+        let paid = child(false);
+        let kept = child(true);
+        // Paid out: $34,000 a year of taxable income; the fund stays at $400K.
+        close(paid.years[1].private_income, 34_000.0, 0.01);
+        close(paid.years[1].balances.private, 400_000.0, 0.01);
+        assert!(paid.years[1].taxes > 0.0);
+        // Reinvested: no cash, the fund grows by its payout, and it's still taxed.
+        assert_eq!(kept.years[1].private_income, 0.0);
+        assert!(kept.years[1].balances.private > 430_000.0);
+        assert!(kept.years[1].taxes > 0.0);
     }
 
     #[test]

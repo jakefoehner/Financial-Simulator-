@@ -14,6 +14,7 @@ export const CHOICE_GROUPS: { id: ChoiceGroup; title: string }[] = [
 
 /** Decisions that need children listed, and those that move investments in kind. */
 export const NEEDS_KIDS: EventType[] = [
+  "give_mix",
   "home_help",
   "cash_gift",
   "family_loan",
@@ -33,6 +34,12 @@ export const EVENT_CHOICES: { type: EventType; group: ChoiceGroup; title: string
     blurb: "A down-payment gift, with an optional family loan for part of the price",
   },
   { type: "cash_gift", group: "kids", title: "Give cash", blurb: "Once or every year, to one child or to each child" },
+  {
+    type: "give_mix",
+    group: "kids",
+    title: "Give a mix of investments",
+    blurb: "Stocks plus income funds (like Evergreen or Cliffwater), repeating every few years if savings hold",
+  },
   {
     type: "family_loan",
     group: "kids",
@@ -104,6 +111,8 @@ export const EVENT_CHOICES: { type: EventType; group: ChoiceGroup; title: string
 /** Extra words people might search for, per decision. */
 export const CHOICE_KEYWORDS: Record<EventType, string> = {
   home_help: "house down payment mortgage buy first home gift loan",
+  give_mix:
+    "mix portfolio stocks income funds credit interval fund evergreen cliffwater yield payout repeat every years million",
   cash_gift: "money gift yearly annual exclusion tax-free each child",
   family_loan: "lend loan afr interest forgive mortgage note",
   gift_assets: "stock shares investments brokerage cost basis in kind meta",
@@ -139,12 +148,32 @@ export function defaultLoan(facts: TaxFacts, amount = 300_000, years = 15): Loan
 /** A sensible starting point for a new decision. `age` is the primary person's age next year. */
 export function newEvent(
   type: EventType,
-  ctx: { firstChild: Id | null; firstGiftAccount: Id | null; age: number; facts: TaxFacts },
+  ctx: {
+    firstChild: Id | null;
+    firstGiftAccount: Id | null;
+    age: number;
+    facts: TaxFacts;
+    /** Today's spendable savings, for the "only if savings hold" default. */
+    savings?: number;
+  },
 ): Event {
   const to = ctx.firstChild ?? 0;
   switch (type) {
     case "home_help":
       return { type, to, age: ctx.age, gift: 100_000, loan: null };
+    case "give_mix":
+      return {
+        type,
+        to: null,
+        amount: 1_000_000,
+        fromAge: ctx.age,
+        everyYears: 4,
+        untilAge: Math.max(ctx.age, 80),
+        minSavings: ctx.savings ? Math.round((ctx.savings * 0.75) / 100_000) * 100_000 : null,
+        stocksShare: 0.6,
+        incomeYield: 0.085,
+        reinvestIncome: false,
+      };
     case "cash_gift":
       return {
         type,
@@ -211,6 +240,7 @@ export function eventAge(e: Event): number {
     case "roth_conversion":
     case "charity_gift":
     case "pay_tuition_medical":
+    case "give_mix":
       return e.fromAge;
     case "charitable_bequest":
       // Happens at the end of the plan.
@@ -256,6 +286,13 @@ export function eventSummary(
       return `From age ${e.fromAge} · Spend ${money(e.annualAmount)} a year`;
     case "social_security_age":
       return `Start Social Security at ${e.age}`;
+    case "give_mix": {
+      const who = e.to == null ? "each child" : nameOf(e.to);
+      const when = e.everyYears > 0 ? `Ages ${e.fromAge}–${e.untilAge}, every ${e.everyYears} yrs` : `Age ${e.fromAge}`;
+      const mix = `${pct(e.stocksShare)} stocks, ${pct(1 - e.stocksShare)} income funds at ${pct(e.incomeYield)}${e.reinvestIncome ? " (reinvested)" : ""}`;
+      const cond = e.minSavings != null ? `, if your savings are above ${money(e.minSavings)}` : "";
+      return `${when} · Give ${who} ${money(e.amount)}: ${mix}${cond}`;
+    }
     case "charity_gift": {
       const where = e.donorAdvised ? "a donor-advised fund" : "charity";
       const what = e.accountId == null ? "" : ` in stock from ${accountName(e.accountId)}`;

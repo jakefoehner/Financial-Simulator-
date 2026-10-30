@@ -35,6 +35,13 @@ export interface Simulation {
   netWorthNominal: Bands;
   representatives: Representative[];
   estate: EstateRange;
+  /** "Give a mix" gifts that happen only while savings hold: how often they did. */
+  conditionalGifts: {
+    madeShare: number;
+    scheduled: number;
+    madeAverage: number;
+    allMadeShare: number;
+  } | null;
 }
 
 /** Mirrors engine::solver. Money in today's dollars. */

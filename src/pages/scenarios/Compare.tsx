@@ -82,6 +82,17 @@ export default function Compare({
           },
         ]
       : []),
+    ...(results.some((r) => r.sim.conditionalGifts)
+      ? [
+          {
+            label: "Gifts made while savings held (avg)",
+            cell: (r: PlanResult) =>
+              r.sim.conditionalGifts
+                ? `${r.sim.conditionalGifts.madeAverage.toFixed(1)} of ${r.sim.conditionalGifts.scheduled.toFixed(0)}`
+                : "—",
+          },
+        ]
+      : []),
     ...(anyCharity
       ? [{ label: "To charity (life + will)", cell: (r: PlanResult) => formatUsdCompact(charityOf(r)) }]
       : []),

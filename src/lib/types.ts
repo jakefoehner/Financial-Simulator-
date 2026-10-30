@@ -90,6 +90,8 @@ export interface PrivateTerms {
   exitMultiple: number;
   companies: number;
   qsbs: boolean;
+  /** Payouts reinvested in the fund (still taxed) instead of paid out. */
+  reinvest: boolean;
 }
 
 export interface IncomeStream {
@@ -198,6 +200,21 @@ export type Event =
       termYears: number;
       rolling: boolean;
       untilAge: number;
+    }
+  | {
+      type: "give_mix";
+      to: Id | null;
+      /** Per child, today's dollars. */
+      amount: number;
+      fromAge: number;
+      /** 0 = once. */
+      everyYears: number;
+      untilAge: number;
+      /** Only give in years spendable savings (today's dollars) are at least this. */
+      minSavings: number | null;
+      stocksShare: number;
+      incomeYield: number;
+      reinvestIncome: boolean;
     };
 
 export type EventType = Event["type"];
@@ -240,6 +257,8 @@ export interface Household {
   oneTimeExpenses: OneTimeExpense[];
   assumptions: Assumptions;
   scenarios: Scenario[];
+  /** Gifts you already give: part of the base plan and every scenario. */
+  ongoing: Event[];
 }
 
 // --- Labels -----------------------------------------------------------------
@@ -366,6 +385,7 @@ export function defaultPrivateTerms(t: AccountType, year = currentYear()): Priva
     exitMultiple: 1.5,
     companies: 1,
     qsbs: false,
+    reinvest: false,
   };
   if (t === "real_estate_fund") return { ...base, cashYield: 0.08, taxableShare: 0.5 };
   if (t === "private_credit") return { ...base, cashYield: 0.085, exitYear: year + 5, exitMultiple: 1 };

@@ -412,6 +412,43 @@
           "untilAge": 70
         }
       ]
+    },
+    {
+      "id": 10,
+      "name": "$1M mix to each kid, every 4 years if savings hold",
+      "notes": "60% stocks, 40% income funds (Evergreen 7% / Cliffwater 10%, about 8.5% a year, paid out). Starts next year, repeats every 4 years through 79, only while spendable savings stay above $10M (today's dollars).",
+      "events": [
+        {
+          "type": "give_mix",
+          "to": null,
+          "amount": 1000000,
+          "fromAge": 59,
+          "everyYears": 4,
+          "untilAge": 79,
+          "minSavings": 10000000,
+          "stocksShare": 0.6,
+          "incomeYield": 0.085,
+          "reinvestIncome": false
+        }
+      ]
+    }
+  ],
+  "ongoing": [
+    {
+      "type": "cash_gift",
+      "to": null,
+      "amount": 0,
+      "fromAge": 58,
+      "years": 42,
+      "maxAnnualExclusion": true
+    },
+    {
+      "type": "cash_gift",
+      "to": null,
+      "amount": 24000,
+      "fromAge": 58,
+      "years": 42,
+      "maxAnnualExclusion": false
     }
   ]
 }

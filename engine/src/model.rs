@@ -332,6 +332,10 @@ pub struct PrivateTerms {
     pub companies: u32,
     /// Startups: gains may qualify for the QSBS exclusion (Section 1202).
     pub qsbs: bool,
+    /// Payouts are reinvested in the fund (it grows; they're still taxed each year)
+    /// instead of paid out as cash.
+    #[serde(default)]
+    pub reinvest: bool,
 }
 
 impl PrivateTerms {
@@ -344,6 +348,7 @@ impl PrivateTerms {
             exit_multiple: 1.5,
             companies: 1,
             qsbs: false,
+            reinvest: false,
         };
         match t {
             AccountType::RealEstateFund => PrivateTerms { cash_yield: 0.08, taxable_share: 0.5, ..base },
@@ -429,6 +434,10 @@ pub struct Household {
     /// "What if" plans built on top of everything above (the base plan).
     #[serde(default)]
     pub scenarios: Vec<Scenario>,
+    /// Gifts you already give (e.g. the yearly maximum to each child): part of the base plan
+    /// and of every scenario.
+    #[serde(default)]
+    pub ongoing: Vec<Event>,
     /// Money arriving from a parent's plan (gifts, 529s, loans, inheritance), by year.
     /// Computed when a child's plan is linked to a parent's; never stored.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -469,6 +478,11 @@ pub struct IncomingTransfer {
     pub loan_payment: f64,
     /// Inheritance after estate tax and the heirs' IRA income tax (stepped-up basis).
     pub inheritance: f64,
+    /// Given as income funds (private credit / interval funds) paying `income_yield` a year...
+    pub income_funds: f64,
+    pub income_yield: f64,
+    /// ...with the payouts reinvested rather than paid out.
+    pub reinvest_income: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -535,6 +549,21 @@ pub enum Event {
         per_year: f64,
         from_age: u32,
         to_age: u32,
+    },
+    /// Give each child (or one) a mix of investments: `stocks_share` in stocks, the rest in
+    /// income funds paying `income_yield` a year (paid out, or reinvested). Repeats every
+    /// `every_years` years (0 = once) through `until_age`, but only in years your spendable
+    /// savings (today's dollars) are at least `min_savings`, if set.
+    GiveMix {
+        to: Option<Id>,
+        amount: f64,
+        from_age: u32,
+        every_years: u32,
+        until_age: u32,
+        min_savings: Option<f64>,
+        stocks_share: f64,
+        income_yield: f64,
+        reinvest_income: bool,
     },
     /// Give to charity (or a donor-advised fund) each year for `years` years: cash, or
     /// appreciated investments from `account_id` (no capital-gains tax; deductible at market value).
@@ -808,6 +837,34 @@ impl Event {
                 }
                 Ok(())
             }
+            Event::GiveMix {
+                to,
+                amount,
+                from_age,
+                every_years,
+                until_age,
+                min_savings,
+                stocks_share,
+                income_yield,
+                ..
+            } => {
+                if let Some(id) = to {
+                    child(*id)?;
+                } else if !people.iter().any(|p| p.role == Role::Child) {
+                    return Err("Add your children on the People page first.".into());
+                }
+                non_negative("Amount", *amount)?;
+                age(*from_age)?;
+                in_range("Repeat every (years)", *every_years, 0, 30)?;
+                if until_age < from_age {
+                    return Err("The last gift's age must be on or after the first.".into());
+                }
+                if let Some(m) = min_savings {
+                    non_negative("Only if savings are at least", *m)?;
+                }
+                in_range("Share in stocks", *stocks_share, 0.0, 1.0)?;
+                in_range("Income funds' yearly payout", *income_yield, 0.0, 0.25)
+            }
             Event::CharityGift { amount, from_age, years, account_id, .. } => {
                 if let Some(id) = account_id {
                     giftable(*id)?;
@@ -862,7 +919,7 @@ impl Event {
             | Event::FamilyLoan { to, .. }
             | Event::Fund529 { to, .. }
             | Event::PayTuitionMedical { to, .. } => Some(*to),
-            Event::CashGift { to, .. } | Event::GiftAssets { to, .. } => *to,
+            Event::CashGift { to, .. } | Event::GiftAssets { to, .. } | Event::GiveMix { to, .. } => *to,
             _ => None,
         }
     }
@@ -900,6 +957,9 @@ impl Household {
         }
         for sc in &self.scenarios {
             sc.validate(&self.people, &self.accounts).map_err(|e| format!("{}: {e}", sc.name))?;
+        }
+        for e in &self.ongoing {
+            e.validate(&self.people, &self.accounts).map_err(|m| format!("Gifts you already give: {m}"))?;
         }
         Ok(())
     }

@@ -154,6 +154,25 @@ Accounts can be **Private real estate fund**, **Private credit fund**, **Startup
   - **CSV** of accounts and positions (Accounts → Export…) and of the plan's year-by-year steady path (Forecast → CSV).
   - **Report / PDF** (Forecast → Report / PDF): a printable summary of one plan for an estate attorney or CPA. It covers the household, the plan's decisions, the range of outcomes and chart, the family/estate card, and the assumptions and data sources. **Save as PDF…** opens the Mac print panel; choose PDF → Save as PDF.
 
+## Where income comes from (no double counting)
+- **Paychecks, pensions, annuities and rent** from property you own are entered on the **Income** page. A property's value is on Accounts and grows on its own; its rent comes only from the Income page.
+- **Private funds** (real estate funds, private credit / income funds) generate their cash payouts from their own terms (yearly payout × what was invested), so **don't** enter them on the Income page. The Income page lists them as "already counted".
+  - A fund can also be set to **reinvest** its payouts: it then grows instead of paying cash, and the payout is still taxed each year.
+- **All income** (paychecks, Social Security, rent, fund payouts, family-loan payments) first pays spending, taxes, debts and gifts. Only what's left is saved, to the brokerage account; anything short comes out of savings.
+
+## Gifts you already give, and gifts that repeat
+- **Gifts you already give** (Spending page) are part of the base plan and **every** scenario: for example the yearly maximum to each child, or $24,000 a year ($2,000 a month).
+  - They count as gifts (yearly exclusion first, then the lifetime exemption, and in each child's total), so leave them out of yearly spending.
+  - They're stored as `Household.ongoing` (migration 0012), and `events_for` puts them in front of each plan's own decisions.
+- **Give a mix of investments** (a decision):
+  - an amount to each child (or one), split between stocks and income funds paying a yearly rate (e.g. 60% stocks / 40% at 8.5%, paid out or reinvested)
+  - once, or every N years through an age
+  - optionally **only while your spendable savings (today's dollars) are above a line you set**
+  - **Mom's side:** each gift is paid from savings and reported in full.
+  - **In the range of outcomes,** gifts below the line are skipped. The forecast reports how many happen on average, and in what share of scenarios all of them happen. Compare adds a row.
+  - **In a linked child household,** the stocks arrive in a brokerage account and the income funds as a "Gifted income funds" holding (private-credit type) paying the rate, with the same default risk as private credit.
+- **Gift-tax limits interact:** the yearly exclusion is per child per year across all gifts. When ongoing gifts already use it, superfunding a 529 or anything else that year uses exemption.
+
 ## Positions, prices and single-stock risk
 - **Positions:** any investment account can list positions (ticker, shares, cost basis), typed in or imported. Changing them moves the account balance by the change in their value; cash and anything unlisted stays as entered.
 - **Prices:** from **Yahoo Finance's public chart data** (no account or key), fetched for positions older than 12 hours when the app opens, or on **Refresh prices**.
